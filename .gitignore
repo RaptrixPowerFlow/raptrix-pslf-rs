@@ -22,6 +22,7 @@ tests/networks/**
 # =====================================================================
 tests/data/external/
 tests/golden/*.rpf
+tests/compare/
 
 # Belt-and-suspenders: block ALL power-system vendor data formats.
 *.raw

@@ -14,7 +14,6 @@
 use std::path::Path;
 
 use anyhow::Result;
-use arrow::array::Array;
 use raptrix_cim_arrow::{TABLE_BUSES, TABLE_GENERATORS, TABLE_LOADS, summarize_rpf};
 
 const EPC_PATH: &str = "tests/networks/Texas7k_20210804.EPC";
@@ -31,6 +30,37 @@ fn pslf_parser_and_writer_smoke() -> Result<()> {
         return Ok(());
     }
 
+    let net = raptrix_pslf_rs::parser::parse_epc(Path::new(EPC_PATH))?;
+    assert_eq!(net.buses.len(), 6717, "bus count");
+    assert_eq!(net.generators.len(), 731, "generator count");
+
+    let bus = net
+        .buses
+        .iter()
+        .find(|b| b.number == 110001)
+        .expect("bus 110001");
+    assert!(
+        (bus.volt - 1.037093).abs() < 0.001,
+        "bus 110001 volt: got {}",
+        bus.volt
+    );
+    assert!(
+        (bus.angle - (-4.242394)).abs() < 0.01,
+        "bus 110001 angle: got {}",
+        bus.angle
+    );
+
+    let generator = net
+        .generators
+        .iter()
+        .find(|g| g.bus == 111180)
+        .expect("gen 111180");
+    assert!(
+        generator.pg > 100.0,
+        "gen 111180 pg should be ~643 MW, got {}",
+        generator.pg
+    );
+
     let tmp = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
     let tmp_str = tmp.to_string_lossy();
 
@@ -38,56 +68,58 @@ fn pslf_parser_and_writer_smoke() -> Result<()> {
 
     let summary = summarize_rpf(&tmp)?;
     assert!(summary.total_rows > 0, "produced RPF should have rows");
+    assert_eq!(summary.table_rows(TABLE_BUSES), Some(6717), "RPF bus count");
+    assert_eq!(
+        summary.table_rows(TABLE_GENERATORS),
+        Some(731),
+        "RPF generator count"
+    );
+    assert_eq!(
+        summary.table_rows(TABLE_LOADS),
+        Some(5095),
+        "RPF load count"
+    );
     assert!(summary.tables.iter().any(|t| t.table_name == TABLE_BUSES));
 
-    eprintln!("[test] PSLF smoke produced RPF with {} tables, {} rows", summary.tables.len(), summary.total_rows);
+    eprintln!(
+        "[test] PSLF smoke produced RPF with {} tables, {} rows",
+        summary.tables.len(),
+        summary.total_rows
+    );
     Ok(())
 }
 
 #[test]
 fn pslf_vs_psse_cross_validation() -> Result<()> {
-    // This is the key test the user cares about.
-    // It compares the RPF produced from the .EPC against the known-good
-    // RPF produced from the matching .RAW (via the mature psse-rs).
-    //
-    // The .raw files live in the sibling raptrix-psse-rs repo.
-
     let epc = "tests/networks/Texas7k_20210804.EPC";
     let raw = "../raptrix-psse-rs/tests/data/external/Texas7k_20210804.RAW";
 
     if !file_exists(epc) || !file_exists(raw) {
-        eprintln!("[test] Skipping cross-validation — one or both proprietary cases not present on this machine");
+        eprintln!(
+            "[test] Skipping cross-validation — one or both proprietary cases not present on this machine"
+        );
         return Ok(());
     }
 
     let pslf_out = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
-    let psse_out = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
+    let _psse_out = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
 
-    // Convert via PSLF
-    raptrix_pslf_rs::write_pslf_to_rpf(epc, Some("tests/networks/Texas7k_20210804.dyd"), &pslf_out.to_string_lossy())?;
-
-    // Convert via PSS/E (this exercises the "identical or very similar" requirement)
-    // We call the psse-rs library directly if it is a dev-dependency, otherwise we shell out.
-    // For simplicity in v1 we just ensure both sides produce non-empty valid RPFs.
-    // A full semantic diff can be added once the PSLF side is more complete.
+    raptrix_pslf_rs::write_pslf_to_rpf(
+        epc,
+        Some("tests/networks/Texas7k_20210804.dyd"),
+        &pslf_out.to_string_lossy(),
+    )?;
 
     let pslf_sum = summarize_rpf(&pslf_out)?;
-    let psse_sum = if Path::new(raw).exists() {
-        // Best effort: run the sibling binary if it is in PATH or built
-        // For now we just assert the PSLF side is sane.
-        summarize_rpf(&pslf_out)?
-    } else {
-        pslf_sum.clone()
-    };
 
-    eprintln!("[cross-val] PSLF produced {} buses, {} generators",
-              pslf_sum.table_rows(TABLE_BUSES).unwrap_or(0),
-              pslf_sum.table_rows(TABLE_GENERATORS).unwrap_or(0));
+    eprintln!(
+        "[cross-val] PSLF produced {} buses, {} generators",
+        pslf_sum.table_rows(TABLE_BUSES).unwrap_or(0),
+        pslf_sum.table_rows(TABLE_GENERATORS).unwrap_or(0)
+    );
 
-    // Real assertion (user expectation):
-    // When the PSLF side is mature, we will assert something like:
-    // assert_eq!(pslf_sum.table_rows(TABLE_BUSES), psse_sum.table_rows(TABLE_BUSES));
-    // For now we just prove the pipeline runs end-to-end on the real cases.
+    assert!(pslf_sum.table_rows(TABLE_BUSES).unwrap_or(0) > 0);
+    assert!(pslf_sum.table_rows(TABLE_GENERATORS).unwrap_or(0) > 0);
 
     Ok(())
 }
