@@ -15,7 +15,10 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use crate::models::{Bus, DydGeneratorData, DydModelData, Generator, Load, Network, Transformer2W};
+use crate::models::{
+    Area, Bus, DydGeneratorData, DydModelData, FixedShunt, Generator, Load, Network, Owner, SwitchedShunt,
+    Transformer2W, Zone,
+};
 
 /// Parse a GE PSLF .epc file.
 pub fn parse_epc(path: &Path) -> Result<Network> {
@@ -108,7 +111,37 @@ pub fn parse_epc(path: &Path) -> Result<Network> {
             continue;
         }
 
-        // Skip other sections for now (area data, owner data, switched shunt, dc, etc.)
+        if lower.starts_with("shunt data") {
+            _current_section = "shunt".to_string();
+            i = parse_shunt_data(&lines, i + 1, &mut network.fixed_shunts)?;
+            continue;
+        }
+
+        if lower.starts_with("svd data") {
+            _current_section = "svd".to_string();
+            i = parse_svd_data(&lines, i + 1, &mut network.switched_shunts)?;
+            continue;
+        }
+
+        if lower.starts_with("area data") {
+            _current_section = "area".to_string();
+            i = parse_area_data(&lines, i + 1, &mut network.areas)?;
+            continue;
+        }
+
+        if lower.starts_with("zone data") {
+            _current_section = "zone".to_string();
+            i = parse_zone_data(&lines, i + 1, &mut network.zones)?;
+            continue;
+        }
+
+        if lower.starts_with("owner data") {
+            _current_section = "owner".to_string();
+            i = parse_owner_data(&lines, i + 1, &mut network.owners)?;
+            continue;
+        }
+
+        // Skip other sections (dc, interface, etc.)
         if is_known_section_header(line) {
             _current_section = lower
                 .split_whitespace()
@@ -447,31 +480,280 @@ fn parse_transformer_data(
     t2w: &mut Vec<Transformer2W>,
     t3w: &mut Vec<crate::models::Transformer3W>,
 ) -> Result<usize> {
-    let mut skip_next = false;
     while start < lines.len() {
         let line = lines[start].trim();
         if line.is_empty() || line.starts_with('!') || is_known_section_header(line) {
             return Ok(start);
         }
-        if skip_next {
-            skip_next = false;
-            start += 1;
+        if let Some(mut xfmr) = parse_transformer_header(line) {
+            for k in 1..=3 {
+                if start + k >= lines.len() {
+                    break;
+                }
+                let cont = lines[start + k].trim();
+                if cont.is_empty() || is_known_section_header(cont) {
+                    break;
+                }
+                apply_transformer_continuation(&mut xfmr, k, cont);
+            }
+            t2w.push(xfmr);
+            start += 4;
             continue;
         }
-        if let Some((t2, t3)) = parse_one_transformer_line(line) {
-            if let Some(xfmr) = t2 {
-                t2w.push(xfmr);
-            }
+        if let Some((_, t3)) = parse_one_transformer_line(line) {
             if let Some(xfmr) = t3 {
                 t3w.push(xfmr);
             }
         }
+        start += 1;
+    }
+    Ok(start)
+}
+
+fn parse_transformer_header(line: &str) -> Option<Transformer2W> {
+    let tokens = tokenize_pslf_line(line);
+    if tokens.len() < 8 {
+        return None;
+    }
+    let from_bus: u32 = tokens[0].parse().ok()?;
+    let to_bus: u32 = tokens.get(3).and_then(|s| s.parse().ok())?;
+    let ckt = tokens.get(6).map(String::as_str).unwrap_or("1").into();
+    let colon_pos = tokens.iter().position(|t| t == ":")?;
+    let status = tokens
+        .get(colon_pos + 1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+    let r = tokens
+        .get(colon_pos + 5)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0.0);
+    let x = tokens
+        .get(colon_pos + 6)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0.0);
+
+    Some(Transformer2W {
+        from_bus,
+        to_bus,
+        ckt,
+        r,
+        x,
+        status,
+        from_kv: tokens.get(2).and_then(|s| s.parse().ok()).unwrap_or(0.0),
+        to_kv: tokens.get(5).and_then(|s| s.parse().ok()).unwrap_or(0.0),
+        ..Default::default()
+    })
+}
+
+fn apply_transformer_continuation(xfmr: &mut Transformer2W, line_idx: usize, line: &str) {
+    if line_idx != 1 {
+        return;
+    }
+    let nums: Vec<f64> = line
+        .split_whitespace()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    if nums.len() >= 2 {
+        if nums[0] > 0.0 {
+            xfmr.from_kv = nums[0];
+        }
+        xfmr.tap = nums[1];
+    }
+    if nums.len() >= 9 {
+        xfmr.rate_a = nums[6];
+        xfmr.rate_b = nums[7];
+        xfmr.rate_c = nums[8];
+    }
+    if nums.len() >= 16 {
+        xfmr.phase_shift = nums[15];
+    }
+}
+
+fn parse_shunt_data(
+    lines: &[String],
+    mut start: usize,
+    shunts: &mut Vec<FixedShunt>,
+) -> Result<usize> {
+    while start < lines.len() {
+        let line = lines[start].trim();
+        if line.is_empty() || line.starts_with('!') || is_known_section_header(line) {
+            return Ok(start);
+        }
+        if let Some(shunt) = parse_one_shunt_line(line) {
+            shunts.push(shunt);
+        }
         if line_has_continuation(line) {
-            skip_next = true;
+            start += 1;
         }
         start += 1;
     }
     Ok(start)
+}
+
+fn parse_one_shunt_line(line: &str) -> Option<FixedShunt> {
+    let tokens = tokenize_pslf_line(line);
+    let colon_pos = tokens.iter().position(|t| t == ":")?;
+    let bus: u32 = tokens[0].parse().ok()?;
+    Some(FixedShunt {
+        bus,
+        id: tokens.get(6).map(String::as_str).unwrap_or("1").into(),
+        status: tokens
+            .get(colon_pos + 1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1),
+        g: tokens
+            .get(colon_pos + 9)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0),
+        b: tokens
+            .get(colon_pos + 10)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0),
+    })
+}
+
+fn parse_svd_data(
+    lines: &[String],
+    mut start: usize,
+    shunts: &mut Vec<SwitchedShunt>,
+) -> Result<usize> {
+    while start < lines.len() {
+        let line = lines[start].trim();
+        if line.is_empty() || line.starts_with('!') || is_known_section_header(line) {
+            return Ok(start);
+        }
+        if let Some(mut shunt) = parse_one_svd_header(line) {
+            if line_has_continuation(line) && start + 1 < lines.len() {
+                parse_svd_continuation(lines[start + 1].trim(), &mut shunt);
+                start += 1;
+            }
+            shunts.push(shunt);
+        }
+        start += 1;
+    }
+    Ok(start)
+}
+
+fn parse_one_svd_header(line: &str) -> Option<SwitchedShunt> {
+    let tokens = tokenize_pslf_line(line);
+    let colon_pos = tokens.iter().position(|t| t == ":")?;
+    let bus: u32 = tokens[0].parse().ok()?;
+    let status = tokens
+        .get(colon_pos + 1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+    let modsw = tokens
+        .get(colon_pos + 2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+    let b_init = tokens
+        .get(colon_pos + 10)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0.0);
+    let vband = tokens
+        .get(colon_pos + 13)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0.015);
+    let vswlo = (1.0_f64 - vband).max(0.0);
+    let vswhi = 1.0 + vband;
+
+    Some(SwitchedShunt {
+        bus,
+        id: tokens.get(6).map(String::as_str).unwrap_or("1").into(),
+        modsw,
+        status,
+        vswlo,
+        vswhi,
+        b_init,
+        ..Default::default()
+    })
+}
+
+fn parse_svd_continuation(line: &str, shunt: &mut SwitchedShunt) {
+    let nums: Vec<f64> = line
+        .split_whitespace()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    if nums.len() >= 2 {
+        let n_steps = nums[0].round().max(0.0) as u32;
+        let b_mvar = nums[1];
+        if n_steps > 0 && b_mvar.abs() > 1.0e-12 {
+            shunt.bank_pairs.push((n_steps, b_mvar));
+            for _ in 0..n_steps {
+                shunt.steps.push(b_mvar);
+            }
+        }
+    }
+}
+
+fn parse_area_data(lines: &[String], mut start: usize, areas: &mut Vec<Area>) -> Result<usize> {
+    while start < lines.len() {
+        let line = lines[start].trim();
+        if line.is_empty() || line.starts_with('!') || is_known_section_header(line) {
+            return Ok(start);
+        }
+        if let Some(area) = parse_one_area_line(line) {
+            areas.push(area);
+        }
+        start += 1;
+    }
+    Ok(start)
+}
+
+fn parse_one_area_line(line: &str) -> Option<Area> {
+    let tokens = tokenize_pslf_line(line);
+    let number: u32 = tokens.first()?.parse().ok()?;
+    let name = tokens.get(1).map(String::as_str).unwrap_or("").into();
+    let swing_bus = tokens.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+    let desired = tokens.get(3).and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    Some(Area {
+        number,
+        name,
+        swing_bus,
+        desired_net_interchange: desired,
+    })
+}
+
+fn parse_zone_data(lines: &[String], mut start: usize, zones: &mut Vec<Zone>) -> Result<usize> {
+    while start < lines.len() {
+        let line = lines[start].trim();
+        if line.is_empty() || line.starts_with('!') || is_known_section_header(line) {
+            return Ok(start);
+        }
+        if let Some(zone) = parse_one_zone_line(line) {
+            zones.push(zone);
+        }
+        start += 1;
+    }
+    Ok(start)
+}
+
+fn parse_one_zone_line(line: &str) -> Option<Zone> {
+    let tokens = tokenize_pslf_line(line);
+    let number: u32 = tokens.first()?.parse().ok()?;
+    let name = tokens.get(1).map(String::as_str).unwrap_or("").into();
+    Some(Zone { number, name })
+}
+
+fn parse_owner_data(lines: &[String], mut start: usize, owners: &mut Vec<Owner>) -> Result<usize> {
+    while start < lines.len() {
+        let line = lines[start].trim();
+        if line.is_empty() || line.starts_with('!') || is_known_section_header(line) {
+            return Ok(start);
+        }
+        if let Some(owner) = parse_one_owner_line(line) {
+            owners.push(owner);
+        }
+        start += 1;
+    }
+    Ok(start)
+}
+
+fn parse_one_owner_line(line: &str) -> Option<Owner> {
+    let tokens = tokenize_pslf_line(line);
+    let number: u32 = tokens.first()?.parse().ok()?;
+    let name = tokens.get(1).map(String::as_str).unwrap_or("").into();
+    Some(Owner { number, name })
 }
 
 fn parse_one_transformer_line(
@@ -564,8 +846,6 @@ pub fn parse_dyd(path: &Path, network: &mut Network) -> Result<()> {
         .with_context(|| format!("failed to open DYD file: {}", path.display()))?;
     let reader = BufReader::new(file);
 
-    let mut current_model: Option<DydModelData> = None;
-
     for line in reader.lines() {
         let line = line.unwrap_or_default();
         let trimmed = line.trim();
@@ -574,60 +854,79 @@ pub fn parse_dyd(path: &Path, network: &mut Network) -> Result<()> {
             continue;
         }
 
-        let lower = trimmed.to_ascii_lowercase();
-
-        // Common dynamic model starters in PSLF DYD
-        if lower.starts_with("genrou")
-            || lower.starts_with("repc_a")
-            || lower.starts_with("esst")
-            || lower.starts_with("ggov")
-            || lower.starts_with("ieeest")
-            || lower.starts_with("lodrep")
-            || lower.starts_with("netting")
-        {
-            if let Some(model) = current_model.take() {
-                network.dyd_models.push(model);
-            }
-
-            let tokens = tokenize_pslf_line(trimmed);
-            if tokens.len() >= 5 {
-                let model_type = tokens[0].clone().into();
-                let bus: u32 = tokens[1].parse().unwrap_or(0);
-                let name = tokens.get(2).map(String::as_str).unwrap_or("").into();
-                let kv: f64 = tokens.get(3).and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                let id = tokens.get(4).map(String::as_str).unwrap_or("1").into();
-
-                let mut params = Vec::new();
-                if let Some(colon_pos) = trimmed.find(':') {
-                    let after = &trimmed[colon_pos + 1..];
-                    for p in after.split_whitespace() {
-                        if let Ok(v) = p.parse::<f64>() {
-                            params.push(v);
-                        }
-                    }
-                }
-
-                current_model = Some(DydModelData {
-                    model_type,
-                    bus,
-                    name,
-                    kv,
-                    id,
-                    params,
-                    raw_line: trimmed.into(),
-                });
-            }
+        if let Some(model) = try_parse_dyd_line(trimmed) {
+            network.dyd_models.push(model);
         }
     }
 
-    if let Some(model) = current_model {
-        network.dyd_models.push(model);
-    }
-
-    // Extract generator-level IBR info (very similar to psse DYR logic)
     network.dyd_generators = extract_dyd_generators(&network.dyd_models);
 
     Ok(())
+}
+
+fn try_parse_dyd_line(line: &str) -> Option<DydModelData> {
+    let lower = line.to_ascii_lowercase();
+    if lower.starts_with("netting")
+        || lower.starts_with("lodrep")
+        || lower == "models"
+        || lower.starts_with("title")
+        || lower.starts_with("comments")
+    {
+        return None;
+    }
+
+    let tokens = tokenize_pslf_line(line);
+    if tokens.len() < 6 {
+        return None;
+    }
+
+    let first = tokens[0].as_str();
+    if !first.chars().next()?.is_ascii_alphabetic() {
+        return None;
+    }
+    // Skip section-like tokens
+    if matches!(
+        first.to_ascii_lowercase().as_str(),
+        "program" | "end" | "header"
+    ) {
+        return None;
+    }
+
+    let bus: u32 = tokens[1].parse().ok()?;
+    if bus == 0 {
+        return None;
+    }
+
+    let colon_pos = tokens.iter().position(|t| t == ":")?;
+    let name = tokens.get(2).map(String::as_str).unwrap_or("").into();
+    let kv: f64 = tokens.get(3).and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    let id = tokens.get(4).map(String::as_str).unwrap_or("1").into();
+
+    let mut params = Vec::new();
+    for token in tokens.iter().skip(colon_pos + 1) {
+        if token.starts_with('#') {
+            continue;
+        }
+        if let Some((_, v)) = token.split_once('=') {
+            if let Ok(val) = v.parse::<f64>() {
+                params.push(val);
+            }
+            continue;
+        }
+        if let Ok(v) = token.parse::<f64>() {
+            params.push(v);
+        }
+    }
+
+    Some(DydModelData {
+        model_type: first.into(),
+        bus,
+        name,
+        kv,
+        id,
+        params,
+        raw_line: line.into(),
+    })
 }
 
 fn extract_dyd_generators(models: &[DydModelData]) -> Vec<DydGeneratorData> {

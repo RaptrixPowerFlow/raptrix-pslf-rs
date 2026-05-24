@@ -27,6 +27,8 @@ pub struct Network {
     pub transformers_3w: Vec<Transformer3W>,
     pub fixed_shunts: Vec<FixedShunt>,
     pub switched_shunts: Vec<SwitchedShunt>,
+    /// Derived from switched shunts at export time (PSSE-style bank rows).
+    pub switched_shunt_banks: Vec<SwitchedShuntBankRow>,
     pub areas: Vec<Area>,
     pub owners: Vec<Owner>,
     pub zones: Vec<Zone>, // often synthetic / derived
@@ -198,19 +200,29 @@ pub struct FixedShunt {
 #[derive(Debug, Clone, Default)]
 pub struct SwitchedShunt {
     pub bus: u32,
+    pub id: Box<str>,
     pub modsw: u8,
-    pub adjm: u8,
     pub status: u8,
+    /// Voltage lower limit (pu).
+    pub vswlo: f64,
+    /// Voltage upper limit (pu).
+    pub vswhi: f64,
+    /// Initial reactive output (MVAr).
     pub b_init: f64,
-    pub banks: Vec<SwitchedShuntBank>,
+    /// Compact (N, B) bank pairs from SVD continuation lines.
+    pub bank_pairs: Vec<(u32, f64)>,
+    /// Flat per-step susceptance values (MVAr), expanded from bank_pairs.
+    pub steps: Vec<f64>,
 }
 
+/// Export row for the `switched_shunt_banks` table.
 #[derive(Debug, Clone, Default)]
-pub struct SwitchedShuntBank {
+pub struct SwitchedShuntBankRow {
     pub shunt_id: i32,
-    pub b: f64,
-    pub steps: i32,
-    pub status: u8,
+    pub bank_id: i32,
+    pub b_mvar: f64,
+    pub status: bool,
+    pub step: i32,
 }
 
 // ---------------------------------------------------------------------------
