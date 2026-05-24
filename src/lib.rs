@@ -15,7 +15,7 @@ pub mod validation;
 
 use std::collections::HashMap;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use arrow::record_batch::RecordBatch;
 use raptrix_cim_arrow::{
     RootWriteOptions, TABLE_AREAS, TABLE_BRANCHES, TABLE_BUSES, TABLE_CONTINGENCIES,
@@ -89,10 +89,7 @@ pub fn write_pslf_to_rpf_with_options(
     };
 
     let case_fingerprint = export::compute_case_fingerprint(&network);
-    let case_mode = options
-        .case_mode_override
-        .clone()
-        .unwrap_or_else(|| "warm_start_planning".to_string());
+    let case_mode = resolve_case_mode(&network, options)?;
 
     let bus_nominal_kv = network
         .buses
@@ -186,6 +183,62 @@ pub fn write_pslf_to_rpf_with_options(
     );
 
     Ok(())
+}
+
+/// Determine `case_mode` from EPC bus voltage state (mirrors psse-rs RAW detection).
+fn detect_case_mode(network: &models::Network) -> &'static str {
+    if network.buses.is_empty() {
+        return "warm_start_planning";
+    }
+    let is_flat = network
+        .buses
+        .iter()
+        .all(|b| (b.volt - 1.0).abs() < 1.0e-4 && b.angle.abs() < 1.0e-4);
+    if is_flat {
+        "flat_start_planning"
+    } else {
+        "warm_start_planning"
+    }
+}
+
+fn resolve_case_mode(network: &models::Network, options: &ExportOptions) -> Result<String> {
+    const ALLOWED: &[&str] = &[
+        "flat_start_planning",
+        "warm_start_planning",
+        "solved_snapshot",
+        "hour_ahead_advisory",
+    ];
+    if let Some(raw) = &options.case_mode_override {
+        let token = raw.trim();
+        if ALLOWED.contains(&token) {
+            return Ok(token.to_string());
+        }
+        bail!(
+            "invalid case_mode override '{raw}'; expected one of: {}",
+            ALLOWED.join(", ")
+        );
+    }
+    Ok(detect_case_mode(network).to_string())
+}
+
+/// v0.9.5+: align with psse-rs / raptrix-cim-arrow planning shunt handoff.
+pub(crate) fn resolved_default_shunt_control_mode(
+    case_mode: &str,
+    override_opt: Option<&str>,
+) -> Option<String> {
+    if let Some(raw) = override_opt {
+        let t = raw.trim();
+        if t.is_empty() {
+            return None;
+        }
+        return Some(t.to_string());
+    }
+    match case_mode {
+        "flat_start_planning" | "warm_start_planning" | "hour_ahead_advisory" => {
+            Some("planning_full".to_string())
+        }
+        _ => None,
+    }
 }
 
 pub fn validate_pslf_epc(epc_path: &str) -> Result<validation::ValidationReport> {

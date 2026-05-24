@@ -78,6 +78,56 @@ The reference test cases live in `tests/networks/` (Texas synthetic grids used f
 
 **Primary regression signal**: For any grid that exists in both formats, the RPF produced from the `.epc` (this tool) must be row-count and aggregate equivalent to the RPF produced from the corresponding `.raw` (psse-rs).
 
+## Cross-Repo Power Flow Integration
+
+End-to-end workflow for comparing PSLF- and PSS/E-derived RPF files under **raptrix-core** Newton–Raphson (PV/PQ modes):
+
+### 1. Generate aligned RPF pairs
+
+```powershell
+# Windows (PSLF via WSL build; PSSE native)
+pwsh scripts/compare-psse-rpf.ps1
+
+# Linux / Git Bash
+bash scripts/compare-psse-rpf.sh
+```
+
+Both scripts pass `--case-mode warm_start_planning --default-shunt-control-mode planning_full` so export metadata matches between converters. Output:
+
+- `tests/compare/pslf/{case}.rpf`
+- `tests/compare/psse/{case}.rpf`
+
+Structural diff: `compare_rpf left.rpf right.rpf` (built with this crate).
+
+### 2. Solve and compare in raptrix-core
+
+```powershell
+cd ..\raptrix-core
+$env:PYTHONPATH = (Get-Location)
+.\.venv\Scripts\python.exe python_tests\regression\pslf_psse_rpf_parity_harness.py `
+  --pslf-dir ..\raptrix-pslf-rs\tests\compare\pslf `
+  --psse-dir ..\raptrix-pslf-rs\tests\compare\psse `
+  --log python_tests\regression\out\pslf_psse_parity.jsonl
+
+.\.venv\Scripts\python.exe python_tests\regression\parse_pslf_psse_log.py `
+  --log python_tests\regression\out\pslf_psse_parity.jsonl `
+  --output python_tests\regression\out\pslf_psse_parity_report.md
+```
+
+### Known PSLF vs PSS/E differences (v0.1)
+
+These are **real format semantics**, not missing parser rows on core tables:
+
+| Topic | PSLF-native | PSS/E-native | PF impact |
+|-------|-------------|--------------|-----------|
+| **Fixed shunts** | Texas7k EPC has `shunt data [0]`; no explicit table rows | 205 `fixed_shunts` rows merged into bus `b_shunt` | **High** — PSLF RPF exports ~0 pu bus shunt vs ~268 pu on PSSE RPF for Texas7k; PSLF-derived cases may not converge in core while PSSE-derived cases do |
+| **SVD bank granularity** | One row per step (`switched_shunt_banks`) | Often compressed banks | Low if bus-level SVD counts match |
+| **Dynamics** | DYD model count ≠ DYR count | Different vendor formats | None for steady-state PF |
+
+Core network tables (buses, branches, generators, loads, transformers_2w, areas, zones, owners) match row counts on Texas7k. Spot checks on bus 110001 voltages and gen 111180 MW match between converters.
+
+**Windows note:** If `cargo build` fails with Application Control (error 4551) under OneDrive, build via WSL: `wsl -e bash -lc 'cd /mnt/c/.../raptrix-pslf-rs && cargo build --release'`, or set `CARGO_TARGET_DIR=C:\temp\raptrix-pslf-rs-target`.
+
 ## Building & Releasing
 
 See the scripts/ directory (copied from the psse-rs sibling):

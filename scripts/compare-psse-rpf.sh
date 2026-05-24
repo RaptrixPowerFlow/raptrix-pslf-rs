@@ -43,17 +43,18 @@ compare_case() {
 
   local pslf_out="$OUT/pslf/${name}.rpf"
   local psse_out="$OUT/psse/${name}.rpf"
+  local export_flags=(--case-mode warm_start_planning --default-shunt-control-mode planning_full)
 
   if [[ -f "$dyd" ]]; then
-    "$PSLF_BIN" convert --epc "$epc" --dyd "$dyd" --output "$pslf_out"
+    "$PSLF_BIN" convert --epc "$epc" --dyd "$dyd" --output "$pslf_out" "${export_flags[@]}"
   else
-    "$PSLF_BIN" convert --epc "$epc" --output "$pslf_out"
+    "$PSLF_BIN" convert --epc "$epc" --output "$pslf_out" "${export_flags[@]}"
   fi
 
   if [[ -f "$dyr" ]]; then
-    "$PSSE_BIN" convert --raw "$raw" --dyr "$dyr" --output "$psse_out"
+    "$PSSE_BIN" convert --raw "$raw" --dyr "$dyr" --output "$psse_out" "${export_flags[@]}"
   else
-    "$PSSE_BIN" convert --raw "$raw" --output "$psse_out"
+    "$PSSE_BIN" convert --raw "$raw" --output "$psse_out" "${export_flags[@]}"
   fi
 
   echo "[written] $pslf_out ($(stat -c%s "$pslf_out") bytes)"

@@ -358,7 +358,10 @@ pub fn build_metadata_batch(
     real_time_discovery.append_null();
 
     let mut default_shunt_control_mode = StringDictionaryBuilder::<Int32Type>::new();
-    if let Some(mode) = &options.default_shunt_control_mode_override {
+    if let Some(mode) = crate::resolved_default_shunt_control_mode(
+        case_mode,
+        options.default_shunt_control_mode_override.as_deref(),
+    ) {
         default_shunt_control_mode.append_value(mode.as_str());
     } else {
         default_shunt_control_mode.append_null();
