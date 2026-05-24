@@ -123,3 +123,50 @@ fn pslf_vs_psse_cross_validation() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn transformer_ps_impedance_from_epc_header() -> Result<()> {
+    if !file_exists(EPC_PATH) {
+        eprintln!("[test] Skipping transformer parse test — proprietary EPC not present");
+        return Ok(());
+    }
+
+    let net = raptrix_pslf_rs::parser::parse_epc(Path::new(EPC_PATH))?;
+    let xfmr = net
+        .transformers
+        .iter()
+        .find(|t| t.from_bus == 110001 && t.to_bus == 110004)
+        .expect("transformer 110001-110004");
+    assert!(
+        (xfmr.r - 1.440e-3).abs() < 1.0e-6,
+        "ps_r: got {}",
+        xfmr.r
+    );
+    assert!(
+        (xfmr.x - 4.775e-2).abs() < 1.0e-5,
+        "ps_x: got {}",
+        xfmr.x
+    );
+    assert!(
+        (xfmr.rate_a - 245.7).abs() < 0.1,
+        "rate_a: got {}",
+        xfmr.rate_a
+    );
+
+    let xfmr_345 = net
+        .transformers
+        .iter()
+        .find(|t| t.from_bus == 110127 && t.to_bus == 110126 && t.ckt.as_ref() == "1")
+        .expect("transformer 110127-110126 ckt 1");
+    assert!(
+        (xfmr_345.tap - 1.0).abs() < 1.0e-6,
+        "tap should be WINDV (1.0), not kV: got {}",
+        xfmr_345.tap
+    );
+    assert!(
+        (xfmr_345.to_kv - 345.0).abs() < 0.1,
+        "to_kv: got {}",
+        xfmr_345.to_kv
+    );
+    Ok(())
+}

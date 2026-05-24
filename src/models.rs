@@ -127,6 +127,7 @@ pub struct Branch {
     pub from_bus: u32,
     pub to_bus: u32,
     pub ckt: Box<str>,
+    /// Per-unit on system base (same convention as PSS/E RAW R/X/B).
     pub r: f64,
     pub x: f64,
     pub b: f64,
@@ -207,11 +208,11 @@ pub struct SwitchedShunt {
     pub vswlo: f64,
     /// Voltage upper limit (pu).
     pub vswhi: f64,
-    /// Initial reactive output (MVAr).
+    /// Initial switched susceptance (pu on system base) from EPC SVD `b` field.
     pub b_init: f64,
-    /// Compact (N, B) bank pairs from SVD continuation lines.
+    /// Compact (N, B) bank pairs from SVD continuation lines (`B` in pu per step).
     pub bank_pairs: Vec<(u32, f64)>,
-    /// Flat per-step susceptance values (MVAr), expanded from bank_pairs.
+    /// Flat per-step susceptance values (pu), expanded from bank_pairs.
     pub steps: Vec<f64>,
 }
 

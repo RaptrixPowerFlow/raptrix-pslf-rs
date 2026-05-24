@@ -120,8 +120,9 @@ These are **real format semantics**, not missing parser rows on core tables:
 
 | Topic | PSLF-native | PSS/E-native | PF impact |
 |-------|-------------|--------------|-----------|
-| **Fixed shunts** | Texas7k EPC has `shunt data [0]`; no explicit table rows | 205 `fixed_shunts` rows merged into bus `b_shunt` | **High** — PSLF RPF exports ~0 pu bus shunt vs ~268 pu on PSSE RPF for Texas7k; PSLF-derived cases may not converge in core while PSSE-derived cases do |
+| **Fixed shunts** | Texas7k EPC has `shunt data [0]`; no explicit table rows | 205 `fixed_shunts` rows | **Resolved for Texas7k** — bus `b_shunt` matches via SVD `b_init_pu`; table row-count still differs |
 | **SVD bank granularity** | One row per step (`switched_shunt_banks`) | Often compressed banks | Low if bus-level SVD counts match |
+| **Bus Q limits** | PV bus `q_min`/`q_max` often 0 in export | Aggregated from online gens | May affect post-solve parity vs PSSE (Q enforcement) |
 | **Dynamics** | DYD model count ≠ DYR count | Different vendor formats | None for steady-state PF |
 
 Core network tables (buses, branches, generators, loads, transformers_2w, areas, zones, owners) match row counts on Texas7k. Spot checks on bus 110001 voltages and gen 111180 MW match between converters.

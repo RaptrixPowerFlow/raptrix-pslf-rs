@@ -35,23 +35,55 @@ Tertiary winding data appears in the `transformer data` section (columns `ts_r`,
 
 ---
 
-## Fixed shunts (known semantic gap)
+## Fixed shunts (table row-count gap)
 
 GE PSLF often stores fixed shunt admittance **inline on bus records** or in vendor-specific sections, while PSS/E uses an explicit `fixed shunt` table in RAW.
 
 | Case | PSLF EPC | PSSE RAW | RPF export today |
 |------|----------|----------|------------------|
-| Texas7k | `shunt data [0]` | 205 fixed shunts | PSLF: 0 rows + 0 pu bus `b_shunt`; PSSE: 205 rows + ~268 pu bus `b_shunt` |
+| Texas7k | `shunt data [0]` | 205 fixed shunts | PSLF: 0 `fixed_shunts` rows; PSSE: 205 rows |
 
-The parser reads `shunt data` when present (`parse_shunt_data` → `fixed_shunts` → bus `g_shunt`/`b_shunt` aggregation). It does **not** yet extract inline bus GL/BL from EPC bus continuation lines. This gap causes **raptrix-core** solve non-convergence on PSLF-derived Texas7k RPF while PSSE-derived RPF converges.
+**PF impact (Texas7k, fixed):** Bus-level `b_shunt` after import now matches PSSE (~267.7 pu) via **SVD `b_init`** mapping (see below). The missing `fixed_shunts` table rows are a structural diff only for Texas7k; they no longer block convergence.
 
-Future work (Option B): map inline PSLF bus shunt fields to `fixed_shunts` and/or bus aggregates for PF parity.
+Future work: map any remaining inline PSLF bus GL/BL (if present on EPC bus continuation) into `fixed_shunts` for full table parity.
 
 ---
 
 ## Switched shunts (SVD)
 
-PSLF `svd data` expands to granular `switched_shunt_banks` rows (e.g. 2873 steps on Texas7k). PSS/E often compresses banks (1865 rows). Bus-level `switched_shunts` counts match when the physical device set aligns.
+PSLF `svd data` fields are **per-unit on system base** (same as applied by raptrix-core on import), not MVar.
+
+| Field | EPC token (after `:`) | RPF column | Notes |
+|-------|----------------------|------------|-------|
+| `b_init` | `+9` | `switched_shunts.b_init_pu` | Do **not** divide by `base_mva` on export |
+| `vband` | `+12` | `v_low` / `v_high` | Voltage band limits |
+| Step `b` | step list | `b_steps` / banks | Positive steps only; stored in pu |
+
+PSLF expands to granular `switched_shunt_banks` rows (e.g. 2873 steps on Texas7k). PSS/E often compresses banks (1865 rows). Bus-level `switched_shunts` counts match when the physical device set aligns.
+
+---
+
+## Branches and transformers (impedance units)
+
+EPC `branch data` and `transformer data` store **R, X, B in per-unit on SBASE** (PSS/E RAW convention). raptrix-core treats non-PSS/E RPF branch/transformer rows with `from_nominal_kv > 0` as **physical units** (Ω, S) and converts with `Z_base = V²/S_base`.
+
+**Export rule (`export.rs`):** write physical values into the RPF so import recovers pu:
+
+- `r_export = r_pu × Z_base`
+- `x_export = x_pu × Z_base`
+- `b_export = b_pu / Z_base`
+
+Use `from_bus` nominal kV for lines; `max(from_kv, to_kv)` for transformers.
+
+**Transformer parse (`parser.rs`):**
+
+| Data | Source |
+|------|--------|
+| `ps_r`, `ps_x` | Last 7 numerics on header line: `tbase ps_r ps_x pt_r pt_x ts_r ts_x` |
+| `from_kv`, `to_kv` | Continuation line 1: first two kV fields (not tap) |
+| `tap` (WINDV) | Continuation line 2: second numeric when ≤ 5.0 (e.g. `1 1.000 ...`) |
+| `rate_a/b/c` | Continuation line 1, indices 6–8 |
+| `nominal_tap_ratio` | Export: `from_kv / to_kv`; `tap_ratio` = WINDV (default 1.0) |
 
 ---
 

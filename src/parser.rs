@@ -523,14 +523,7 @@ fn parse_transformer_header(line: &str) -> Option<Transformer2W> {
         .get(colon_pos + 1)
         .and_then(|s| s.parse().ok())
         .unwrap_or(1);
-    let r = tokens
-        .get(colon_pos + 5)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0.0);
-    let x = tokens
-        .get(colon_pos + 6)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0.0);
+    let (r, x) = parse_trailing_ps_impedance(&tokens).unwrap_or((0.0, 0.0));
 
     Some(Transformer2W {
         from_bus,
@@ -545,27 +538,54 @@ fn parse_transformer_header(line: &str) -> Option<Transformer2W> {
     })
 }
 
-fn apply_transformer_continuation(xfmr: &mut Transformer2W, line_idx: usize, line: &str) {
-    if line_idx != 1 {
-        return;
+/// PSLF transformer header lines end with `tbase ps_r ps_x pt_r pt_x ts_r ts_x`.
+fn parse_trailing_ps_impedance(tokens: &[String]) -> Option<(f64, f64)> {
+    let nums: Vec<f64> = tokens
+        .iter()
+        .filter_map(|t| t.parse::<f64>().ok())
+        .collect();
+    if nums.len() >= 7 {
+        let n = nums.len();
+        let tbase = nums[n - 7];
+        if tbase >= 10.0 {
+            return Some((nums[n - 6], nums[n - 5]));
+        }
     }
+    None
+}
+
+fn apply_transformer_continuation(xfmr: &mut Transformer2W, line_idx: usize, line: &str) {
     let nums: Vec<f64> = line
         .split_whitespace()
         .filter_map(|s| s.parse().ok())
         .collect();
-    if nums.len() >= 2 {
-        if nums[0] > 0.0 {
-            xfmr.from_kv = nums[0];
+    match line_idx {
+        // PSLF line 1: from_kv to_kv ... rates ... (not tap ratio).
+        1 => {
+            if nums.len() >= 2 {
+                if nums[0] > 0.0 {
+                    xfmr.from_kv = nums[0];
+                }
+                if nums[1] > 0.0 {
+                    xfmr.to_kv = nums[1];
+                }
+            }
+            if nums.len() >= 9 {
+                xfmr.rate_a = nums[6];
+                xfmr.rate_b = nums[7];
+                xfmr.rate_c = nums[8];
+            }
+            if nums.len() >= 16 {
+                xfmr.phase_shift = nums[15];
+            }
         }
-        xfmr.tap = nums[1];
-    }
-    if nums.len() >= 9 {
-        xfmr.rate_a = nums[6];
-        xfmr.rate_b = nums[7];
-        xfmr.rate_c = nums[8];
-    }
-    if nums.len() >= 16 {
-        xfmr.phase_shift = nums[15];
+        // PSLF line 2: control flags then WINDV-like tap (e.g. `1 1.000 ...`).
+        2 => {
+            if nums.len() >= 2 && nums[1] > 0.0 && nums[1] <= 5.0 {
+                xfmr.tap = nums[1];
+            }
+        }
+        _ => {}
     }
 }
 
@@ -647,11 +667,11 @@ fn parse_one_svd_header(line: &str) -> Option<SwitchedShunt> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(1);
     let b_init = tokens
-        .get(colon_pos + 10)
+        .get(colon_pos + 9)
         .and_then(|s| s.parse().ok())
         .unwrap_or(0.0);
     let vband = tokens
-        .get(colon_pos + 13)
+        .get(colon_pos + 12)
         .and_then(|s| s.parse().ok())
         .unwrap_or(0.015);
     let vswlo = (1.0_f64 - vband).max(0.0);

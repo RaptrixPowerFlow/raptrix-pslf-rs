@@ -41,16 +41,17 @@ pub fn compute_case_fingerprint(network: &Network) -> String {
 }
 
 pub fn derive_switched_shunt_banks(network: &mut Network) {
+    let base_mva = network.sbase.abs().max(1.0e-9);
     network.switched_shunt_banks.clear();
     for (shunt_row_idx, shunt) in network.switched_shunts.iter().enumerate() {
         let shunt_id = (shunt_row_idx + 1) as i32;
-        for (bank_idx, (n_steps, b_mvar)) in shunt.bank_pairs.iter().enumerate() {
+        for (bank_idx, (n_steps, b_pu)) in shunt.bank_pairs.iter().enumerate() {
             let bank_id = (bank_idx + 1) as i32;
             for step in 1..=(*n_steps as i32) {
                 network.switched_shunt_banks.push(SwitchedShuntBankRow {
                     shunt_id,
                     bank_id,
-                    b_mvar: *b_mvar,
+                    b_mvar: *b_pu * base_mva,
                     status: shunt.status != 0,
                     step,
                 });
@@ -73,6 +74,26 @@ pub struct BusAggregate {
     qg_sched_pu: f64,
     has_generator: bool,
     v_mag_set_override: Option<f64>,
+}
+
+/// raptrix-core treats non-PSS/E branch/transformer R/X/B as physical (Ω, S) when
+/// `from_nominal_kv` is set and converts with Z_base = V²/S_base. PSLF EPC stores
+/// the same per-unit values as PSS/E RAW, so export must scale into physical units.
+fn impedance_z_base(nominal_kv: f64, base_mva: f64) -> f64 {
+    if nominal_kv > 1.0 {
+        (nominal_kv * nominal_kv) / base_mva.abs().max(1.0e-9)
+    } else {
+        1.0
+    }
+}
+
+fn branch_z_base(from_bus: u32, bus_nominal_kv: &HashMap<u32, f64>, base_mva: f64) -> f64 {
+    let v_nom = bus_nominal_kv.get(&from_bus).copied().unwrap_or(0.0);
+    impedance_z_base(v_nom, base_mva)
+}
+
+fn transformer_z_base(from_kv: f64, to_kv: f64, base_mva: f64) -> f64 {
+    impedance_z_base(from_kv.max(to_kv), base_mva)
 }
 
 fn build_bus_aggregates(network: &Network) -> HashMap<u32, BusAggregate> {
@@ -732,9 +753,10 @@ pub fn build_branches_batch(
         from_bus_id.append_value(branch.from_bus as i32);
         to_bus_id.append_value(branch.to_bus as i32);
         ckt.append_value(branch.ckt.as_ref());
-        r.append_value(branch.r);
-        x.append_value(branch.x);
-        b_shunt.append_value(branch.b);
+        let z_base = branch_z_base(branch.from_bus, bus_nominal_kv, base_mva);
+        r.append_value(branch.r * z_base);
+        x.append_value(branch.x * z_base);
+        b_shunt.append_value(branch.b / z_base);
         tap.append_value(1.0);
         phase.append_value(0.0);
         rate_a.append_value(branch.rate_a / base_mva);
@@ -846,24 +868,6 @@ pub fn build_transformers_2w_batch(
         from_bus_id.append_value(t.from_bus as i32);
         to_bus_id.append_value(t.to_bus as i32);
         ckt.append_value(t.ckt.as_ref());
-        r.append_value(t.r);
-        x.append_value(t.x);
-        winding1_r.append_value(0.0);
-        winding1_x.append_value(0.0);
-        winding2_r.append_value(0.0);
-        winding2_x.append_value(0.0);
-        g.append_value(0.0);
-        b.append_value(t.b);
-        let tap = if t.tap > 0.0 { t.tap } else { 1.0 };
-        tap_ratio.append_value(tap);
-        nominal_tap_ratio.append_value(tap);
-        phase_shift.append_value(t.phase_shift.to_radians());
-        vector_group.append_value("unknown");
-        rate_a.append_value(t.rate_a / base_mva);
-        rate_b.append_value(t.rate_b / base_mva);
-        rate_c.append_value(t.rate_c / base_mva);
-        status.append_value(t.status != 0);
-        name_b.append_null();
         let from_kv = if t.from_kv > 0.0 {
             t.from_kv
         } else {
@@ -874,6 +878,30 @@ pub fn build_transformers_2w_batch(
         } else {
             *bus_nominal_kv.get(&t.to_bus).unwrap_or(&0.0)
         };
+        let z_base = transformer_z_base(from_kv, to_kv, base_mva);
+        r.append_value(t.r * z_base);
+        x.append_value(t.x * z_base);
+        winding1_r.append_value(0.0);
+        winding1_x.append_value(0.0);
+        winding2_r.append_value(0.0);
+        winding2_x.append_value(0.0);
+        g.append_value(0.0);
+        b.append_value(t.b / z_base);
+        let tap = if t.tap > 0.0 { t.tap } else { 1.0 };
+        let nominal_tap = if from_kv > 0.0 && to_kv > 0.0 {
+            from_kv / to_kv
+        } else {
+            1.0
+        };
+        tap_ratio.append_value(tap);
+        nominal_tap_ratio.append_value(nominal_tap);
+        phase_shift.append_value(t.phase_shift.to_radians());
+        vector_group.append_value("unknown");
+        rate_a.append_value(t.rate_a / base_mva);
+        rate_b.append_value(t.rate_b / base_mva);
+        rate_c.append_value(t.rate_c / base_mva);
+        status.append_value(t.status != 0);
+        name_b.append_null();
         from_nominal_kv.append_value(from_kv);
         to_nominal_kv.append_value(to_kv);
     }
@@ -1032,7 +1060,7 @@ fn estimate_current_step(target_binit: f64, steps: &[f64]) -> i32 {
 
 pub fn build_switched_shunts_batch(
     shunts: &[SwitchedShunt],
-    base_mva: f64,
+    _base_mva: f64,
 ) -> Result<RecordBatch> {
     let schema =
         Arc::new(table_schema(TABLE_SWITCHED_SHUNTS).expect("switched_shunts schema must exist"));
@@ -1059,9 +1087,9 @@ pub fn build_switched_shunts_batch(
         v_high.append_value(shunt.vswhi);
 
         let mut step_values_pu = Vec::with_capacity(shunt.steps.len());
-        for &step_mvar in &shunt.steps {
-            if step_mvar > 0.0 {
-                step_values_pu.push(step_mvar / base_mva);
+        for &step_pu in &shunt.steps {
+            if step_pu > 0.0 {
+                step_values_pu.push(step_pu);
             }
         }
         for &step_pu in &step_values_pu {
@@ -1069,7 +1097,7 @@ pub fn build_switched_shunts_batch(
         }
         b_steps.append(true);
 
-        let binit_pu = shunt.b_init / base_mva;
+        let binit_pu = shunt.b_init;
         current_step.append_value(estimate_current_step(binit_pu, &step_values_pu));
         b_init_pu.append_value(binit_pu);
 
