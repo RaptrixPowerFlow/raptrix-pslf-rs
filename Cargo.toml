@@ -1,0 +1,40 @@
+# raptrix-pslf-rs
+# Copyright (c) 2026 Raptrix PowerFlow
+#
+# This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
+# If a copy of the MPL was not distributed with this file, You can obtain one at
+# https://mozilla.org/MPL/2.0/.
+
+[package]
+name = "raptrix-pslf-rs"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["Raptrix PowerFlow <dev@raptrix.com>"]
+license = "MPL-2.0"
+description = "High-performance GE PSLF (.epc + .dyd) -> Raptrix PowerFlow Interchange v0.10.0 converter"
+repository = "https://github.com/RaptrixPowerFlow/raptrix-pslf-rs"
+keywords = ["pslf", "ge-pslf", "power-systems", "converter", "raptrix", "cim"]
+categories = ["command-line-utilities", "parser-implementations"]
+
+[dependencies]
+anyhow = "1.0"
+arrow = "58.0"
+chrono = { version = "0.4", default-features = true }
+clap = { version = "4", features = ["derive"] }
+# Use the public raptrix-cim-rs implementation (CIM is canonical).
+# Pin matches the current raptrix-psse-rs rev for full interchange compatibility.
+raptrix-cim-arrow = { git = "https://github.com/RaptrixPowerFlow/raptrix-cim-rs", rev = "b08d841a6c731e2df6d56cdff6d06dba8ced4e26" }
+
+[dev-dependencies]
+# Golden-file integration tests depend on the raptrix-cim-arrow reader.
+tempfile = "3.8"
+
+[profile.release]
+opt-level = 3
+# Link-time optimization for best runtime performance
+lto = true
+# Fewer codegen units yields better optimizations at the cost of slower compile
+codegen-units = 1
+debug = false
+incremental = false
