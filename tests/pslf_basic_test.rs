@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::Result;
-use arrow::array::{Float64Array, Int32Array};
+use arrow::array::{Float64Array, Int8Array, Int32Array};
 use raptrix_cim_arrow::{TABLE_BUSES, TABLE_GENERATORS, TABLE_LOADS, read_rpf_tables, summarize_rpf};
 
 const EPC_PATH: &str = "tests/networks/Texas7k_20210804.EPC";
@@ -107,6 +107,12 @@ fn pslf_parser_and_writer_smoke() -> Result<()> {
         .as_any()
         .downcast_ref::<Float64Array>()
         .expect("v_mag_set Float64");
+    let bus_type_col = buses
+        .column_by_name("type")
+        .expect("type column in buses")
+        .as_any()
+        .downcast_ref::<Int8Array>()
+        .expect("type Int8");
     let q_min_col = buses
         .column_by_name("q_min")
         .expect("q_min column")
@@ -127,18 +133,25 @@ fn pslf_parser_and_writer_smoke() -> Result<()> {
         .iter()
         .find(|b| b.number == 111180)
         .expect("bus 111180 in parsed EPC");
+    // v_mag_set for generator buses now comes from bus.vsched (EPC bus record, colon+2),
+    // not from the continuation-line generator.vs placeholder.
+    // For bus 111180: vsched = 1.038548 in Texas7k EPC.
     assert!(
-        generator.vs > 0.0,
-        "gen 111180 should carry continuation VS placeholder, got {}",
-        generator.vs
-    );
-    assert!(
-        (v_mag_col.value(bus_idx) - generator.vs).abs() < 0.001,
-        "gen bus 111180 v_mag_set should follow generator VS ({:.6}), got {}",
-        generator.vs,
+        (v_mag_col.value(bus_idx) - bus_111180.vsched).abs() < 0.001,
+        "gen bus 111180 v_mag_set should follow bus.vsched ({:.6}), got {}",
+        bus_111180.vsched,
         v_mag_col.value(bus_idx)
     );
-    let _ = bus_111180.volt; // warm-start VM retained on EPC bus, overridden at export
+    assert!(
+        (bus_111180.vsched - 1.038548_f64).abs() < 0.0001,
+        "bus 111180 vsched from EPC: expected ~1.038548, got {}",
+        bus_111180.vsched
+    );
+    assert_eq!(
+        bus_type_col.value(bus_idx),
+        2i8,
+        "gen bus 111180 must be exported as type-2 (PV)"
+    );
     // sbase from EPC header — Texas7k uses 100
     let base_mva = net.sbase;
     let expected_qmin = generator.qb / base_mva;

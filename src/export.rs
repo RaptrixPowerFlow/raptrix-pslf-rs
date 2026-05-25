@@ -73,7 +73,6 @@ pub struct BusAggregate {
     qd_load_pu: f64,
     qg_sched_pu: f64,
     has_generator: bool,
-    v_mag_set_override: Option<f64>,
 }
 
 /// raptrix-core treats non-PSS/E branch/transformer R/X/B as physical (Ω, S) when
@@ -160,10 +159,6 @@ fn build_bus_aggregates(network: &Network) -> HashMap<u32, BusAggregate> {
 
             agg.p_min_agg += generator.pb / base_mva;
             agg.p_max_agg += generator.pt / base_mva;
-
-            if generator.vs.is_finite() && generator.vs > 0.0 {
-                agg.v_mag_set_override = Some(generator.vs);
-            }
         }
     }
 
@@ -190,19 +185,6 @@ fn sanitize_bus_voltage(raw_vm: f64, raw_va_deg: f64) -> (f64, f64) {
         0.0
     };
     (v_mag, v_ang_rad)
-}
-
-/// PSLF continuation rows often carry VS=1.0 as a placeholder. Prefer bus VM when
-/// a meaningful non-placeholder VS appears on the primary row (future core support).
-#[allow(dead_code)]
-fn generator_vs_for_voltage_set(vs: f64) -> Option<f64> {
-    if !vs.is_finite() || vs <= 0.0 {
-        return None;
-    }
-    if (vs - 1.0).abs() <= 0.01 {
-        return None;
-    }
-    Some(vs)
 }
 
 /// Raw QB/QT pair in MVAr from a generator record (swapped if inverted).
@@ -491,8 +473,11 @@ pub fn build_buses_batch(
 
     for bus in buses {
         let agg = agg_by_bus.get(&bus.number).cloned().unwrap_or_default();
-        let (v_mag, v_ang) = if let Some(vs) = agg.v_mag_set_override {
-            sanitize_bus_voltage(vs, bus.angle)
+        // For generator buses use the EPC voltage schedule (vsched) as the PV regulation
+        // target. The PSLF continuation-line VS token is a placeholder (≈1.0) and must NOT
+        // override the correct schedule from the bus record.
+        let (v_mag, v_ang) = if agg.has_generator {
+            sanitize_bus_voltage(bus.vsched, bus.angle)
         } else {
             sanitize_bus_voltage(bus.volt, bus.angle)
         };
@@ -504,7 +489,12 @@ pub fn build_buses_batch(
 
         bus_id.append_value(bus.number as i32);
         name.append_value(bus.name.as_ref());
-        bus_type.append_value(canonical_bus_type_code(bus.ty));
+        // PSLF EPC bus records store ty=1 for all connected buses (PV/PQ is implicit from
+        // attached devices). Infer type-2 (PV) from generator presence so that raptrix-core's
+        // Q-switch mechanism fires correctly. Type-3 (slack) is auto-assigned by core when no
+        // explicit swing bus is present in the EPC (area swing_bus=0 for Texas cases).
+        let type_code = if agg.has_generator { 2i8 } else { canonical_bus_type_code(bus.ty) };
+        bus_type.append_value(type_code);
         p_sched.append_value(agg.p_sched);
         q_sched.append_value(agg.q_sched);
         v_mag_set.append_value(v_mag);

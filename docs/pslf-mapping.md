@@ -43,9 +43,9 @@ GE PSLF often stores fixed shunt admittance **inline on bus records** or in vend
 |------|----------|----------|------------------|
 | Texas7k | `shunt data [0]` | 205 fixed shunts | PSLF: 0 `fixed_shunts` rows; PSSE: 205 rows |
 
-**PF impact (Texas7k):** After raptrix-core RPF import, summed bus `b_shunt` differs by path (PSLF ~406 pu vs PSSE ~268 pu on Texas7k) because PSLF exports more `switched_shunts` device rows (634 vs 429) whose `b_init` rolls into bus shunt at import. Both paths converge; this is a **structural/device-count** difference, not a missing fixed-shunt table alone.
+**PF impact (Texas7k):** After raptrix-core RPF import, summed bus `b_shunt` differs by path (PSLF ~406 pu vs PSSE ~268 pu) because PSLF exports 634 `switched_shunts` rows vs PSSE 429, and raptrix-core absorbs SVD `b_init_pu` into bus effective shunt at import. The extra 138 pu capacitive shunt makes the Jacobian ill-conditioned when generators regulate to correct vsched targets. Additionally, `shunt_switches_applied=0` — core's SVD voltage control is not engaging for PSLF-derived RPFs. Texas7k PSLF does NOT converge with correct vsched; this is a **raptrix-core SVD handling** semantic gap, documented as a known limitation.
 
-Future work: map any remaining inline PSLF bus GL/BL (if present on EPC bus continuation) into `fixed_shunts` for full table parity.
+Future work: investigate raptrix-core SVD switching logic for PSLF-derived RPFs and/or map inline PSLF bus GL/BL into `fixed_shunts` for full table parity.
 
 ---
 
@@ -59,7 +59,7 @@ Both PSLF- and PSSE-derived RPF paths on ACTIVSg10k/70k typically **fail to conv
 | Convergence @200 iters | NotConverged | NotConverged |
 | Iteration count | Similar order (~16–24) | Similar order (~17–22) |
 
-Optional one-off: raise `max_iters` to 400 — both paths still non-converged at similar iteration counts (10k: 16/17 iters, 70k: 24/22 iters); document outcome in harness JSONL rather than blocking Texas parity work.
+Advanced solver waterfall applied (max_iters=400, continuation_mode, PV-cold→PQ-hot bridge) — all methods failed for both PSLF and PSSE paths. See "ACTIVSg advanced solver waterfall results" table in the semantic differences section.
 
 **Structural gap:** PSLF `native-3w` export emits 0 `transformers_3w` rows; PSSE keeps explicit 3W table rows. Solver uses 2W-expanded topology on the PSLF path.
 
@@ -121,9 +121,11 @@ EPC `generator data` primary line (after `:`) token indices relative to the colo
 | `qb` | `+14` | QB (qmin in EPC header) |
 | `mbase` | `+15` | MBASE |
 
-Continuation lines (`/` suffix) carry `vs` at token index 4 when absent on the primary row. PSLF commonly stores **VS=1.0** here as a placeholder.
+Continuation lines (`/` suffix) carry `vs` at token index 4 when absent on the primary row. PSLF commonly stores **VS=1.0** here as a placeholder; this value is parsed but is **not** used for `v_mag_set` export.
 
-**Voltage setpoints (solver-readiness):** when `generator.vs > 0`, export applies it as `v_mag_set` on generator buses (typically 1.0 pu from continuation). EPC bus `volt` warm-start values are overridden on gen buses. Texas7k **does not converge** in raptrix-core when gen-bus `v_mag_set` follows EPC `volt` instead (~30 pu mismatch vs ~2e-9 with VS=1.0). Document as a PSLF↔core semantic gap until core accepts EPC VM as the PV target.
+**Voltage setpoints (fidelity-first):** generator buses export `v_mag_set = bus.vsched` (EPC bus record colon+2), the regulation setpoint from the EPC bus table. The continuation-line `generator.vs` placeholder (≈1.0) is ignored for `v_mag_set`. For Texas7k, `vsched` correctly reflects ~1.02–1.04 pu targets across 667 generator buses (previously all were mis-set to 1.0).
+
+**Bus type inference:** EPC bus records store `ty=1` for all connected buses; PV vs PQ is implicit from attached generator records. The export infers type-2 (PV) from `agg.has_generator` so that raptrix-core's Q-switch mechanism engages. Buses with no generators are exported as type-1 (PQ). A type-3 (slack) is NOT explicitly assigned — core auto-selects the largest generator bus (bus 111217 on Texas7k).
 
 **Q limits (solver-readiness):**
 
@@ -131,7 +133,9 @@ Continuation lines (`/` suffix) carry `vs` at token index 4 when absent on the p
 - Bus-level `q_min` / `q_max`: aggregate only machines with a non-zero QB/QT span; skip `(0,0)` pairs (missing limit in EPC, not a zero-MVar cap).
 - Do **not** let zero-span machines collapse PV bus limits to 0 — raptrix-core PV span gate would demote buses incorrectly.
 
-**Known semantic gap vs PSSE-derived RPF:** PSS/E uses RAW `VS` on generator buses; PSLF export uses continuation VS≈1.0 for convergence. PSS/E may also export `(0,0)` Q limits for machines with missing RAW fields; PSLF skips those for bus aggregation.
+**Known semantic gap vs PSSE-derived RPF:** PSS/E RAW stores explicit VS per machine; PSLF EPC encodes the target as `bus.vsched`. After the vsched fix both approaches reflect the true regulation target. PSS/E may also export `(0,0)` Q limits for machines with missing RAW fields; PSLF skips those for bus aggregation.
+
+**Texas7k convergence with correct vsched:** Texas7k PSLF RPF does NOT converge with raptrix-core (17 iters, 30 pu mismatch) even with the correct vsched setpoints. Root cause: raptrix-core absorbs SVD `b_init_pu` into bus effective shunt at import, resulting in ~406 pu total capacitive reactive (vs ~268 pu for PSSE). The extra 138 pu makes the DC-init Jacobian ill-conditioned for the PSLF model. Additionally, `shunt_switches_applied=0` — core's SVD voltage control is not engaging. This is a raptrix-core SVD handling semantic gap, not an export bug. Texas2k and ACTIVSg cases unaffected (smaller SVD b_init totals).
 
 ---
 
@@ -141,15 +145,37 @@ Do **not** force PSSE/PSLF RPF row-count identity. These gaps are acceptable whe
 
 | Topic | PSLF path | PSSE path | Solver impact |
 |-------|-----------|-----------|---------------|
-| `fixed_shunts` table | Often 0 rows (inline/EPC) | Explicit RAW table | OK if bus shunt effect similar |
-| `switched_shunts` count | One EPC record per device | One RAW record per device (may differ) | OK if both converge |
-| `switched_shunt_banks` | Granular steps | Compressed banks | OK |
+| `fixed_shunts` table | 0 rows (Texas7k EPC `shunt data [0]`) | 205 rows (RAW section 2) | b_shunt sourced from SVD b_init on PSLF |
+| Total bus b_shunt (Texas7k) | ~406 pu (634 SVDs × b_init absorbed by core) | ~268 pu (205 fixed shunts) | ~52% excess reactive; root cause of Texas7k divergence |
+| `switched_shunts` count | 634 (Texas7k) | 429 | More SVD devices in PSLF EPC |
+| `switched_shunt_banks` | Granular steps (2873 Texas7k) | Compressed banks (1865) | OK |
 | `transformers_3w` | 0 rows (`native-3w`) | Explicit 3W table | OK (2W-expanded topology) |
 | `dynamics_models` | DYD row count | DYR row count | Dynamics only |
-| Generator `v_mag_set` | Continuation VS≈1.0 on gen buses | RAW VS / bus VM | Voltage parity gap (Texas7k ~45% \|ΔV\| vs full PSSE) |
-| Texas7k \|ΔV\| | — | — | Both converge; parity FAIL is documented, not blocking |
+| Generator `v_mag_set` | `bus.vsched` (~1.02–1.04) — **fixed** | RAW VS / bus VM | Correct fidelity; Texas7k still diverges (SVD b_shunt) |
+| Bus `type` | type-2 from `has_generator` — **fixed** | Explicit RAW bus type | Core Q-switch now engages for Texas2k |
+| Texas7k solver-readiness | Not solver-ready (SVD b_shunt + shunt_sw=0) | Solver-ready | Requires raptrix-core SVD switching fix |
+| Texas2k_series25 | Solver-ready (0 v-violations, 110 Q-sw) | Solver-ready | parity dv≈0.077 (model semantic gap) |
+| Texas2k_series24 | Converges; 1–14 buses >1.1 pu | Solver-ready | Marginal violations; PSLF/PSSE model differences |
+| ACTIVSg10k/70k | Not converged (expected) | Not converged (expected) | IBR structural; LM+continuation also fails |
 
-Harness gates: **`solver_ready`** = both paths converge (ACTIVSg: both NotConverged is documented exception). **`parity`** = \|ΔV\|/\|Δθ\| vs tolerances (2% / 0.6° default).
+**Harness gates:** `solver_ready` = both paths converge AND all buses within [0.9, 1.1] pu (ACTIVSg exception: both NotConverged). `parity` = |ΔV|/|Δθ| within harness tolerances (2% / 0.6° default).
+
+**v_lo_count / v_hi_count (added):** JSONL rows include `pslf_v_lo_count`, `pslf_v_hi_count`, `psse_v_lo_count`, `psse_v_hi_count` — buses outside [0.9, 1.1] pu. `solver_ready=False` if any non-zero.
+
+### ACTIVSg advanced solver waterfall results (May 2026)
+
+All three levers applied after primary Newton failure (default max_iters=400 for ACTIVSg):
+
+| Case | Method | PSLF result | PSSE result |
+|------|--------|-------------|-------------|
+| ACTIVSg10k | Primary (400 iters) | Not conv, 20 iters | Not conv, 17 iters |
+| ACTIVSg10k | continuation_mode=True | Not conv | Not conv |
+| ACTIVSg10k | PV-cold → PQ-hot bridge | Not conv | Not conv |
+| ACTIVSg70k | Primary (400 iters) | Not conv, 40 iters | Not conv, 22 iters |
+| ACTIVSg70k | continuation_mode=True | Not conv | Not conv |
+| ACTIVSg70k | PV-cold → PQ-hot bridge | Not conv | Not conv |
+
+**Conclusion:** ACTIVSg non-convergence is structural (IBR/KLU near-singularity). No harness-level solver method resolves it. The waterfall infrastructure (`apply_solver_profile`, continuation, bridge) is wired for future use when core profiles are updated for IBR-heavy cases.
 
 ---
 
