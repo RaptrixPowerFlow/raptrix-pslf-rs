@@ -145,35 +145,17 @@ fn build_bus_aggregates(network: &Network) -> HashMap<u32, BusAggregate> {
             agg.q_sched += generator.qg / base_mva;
             agg.qg_sched_pu += generator.qg / base_mva;
 
-            let (raw_qmin, raw_qmax) = if generator.qb.is_finite() && generator.qt.is_finite() {
-                if generator.qb > generator.qt {
-                    (generator.qt, generator.qb)
+            if let Some((raw_qmin, raw_qmax)) = generator_q_limits_mvar(generator) {
+                let qmin = raw_qmin / base_mva;
+                let qmax = raw_qmax / base_mva;
+                if agg.has_generator {
+                    agg.q_min = agg.q_min.min(qmin);
+                    agg.q_max = agg.q_max.max(qmax);
                 } else {
-                    (generator.qb, generator.qt)
+                    agg.q_min = qmin;
+                    agg.q_max = qmax;
+                    agg.has_generator = true;
                 }
-            } else {
-                (
-                    if generator.qb.is_finite() {
-                        generator.qb
-                    } else {
-                        0.0
-                    },
-                    if generator.qt.is_finite() {
-                        generator.qt
-                    } else {
-                        0.0
-                    },
-                )
-            };
-            let qmin = raw_qmin / base_mva;
-            let qmax = raw_qmax / base_mva;
-            if agg.has_generator {
-                agg.q_min = agg.q_min.min(qmin);
-                agg.q_max = agg.q_max.max(qmax);
-            } else {
-                agg.q_min = qmin;
-                agg.q_max = qmax;
-                agg.has_generator = true;
             }
 
             agg.p_min_agg += generator.pb / base_mva;
@@ -208,6 +190,46 @@ fn sanitize_bus_voltage(raw_vm: f64, raw_va_deg: f64) -> (f64, f64) {
         0.0
     };
     (v_mag, v_ang_rad)
+}
+
+/// PSLF continuation rows often carry VS=1.0 as a placeholder. Prefer bus VM when
+/// a meaningful non-placeholder VS appears on the primary row (future core support).
+#[allow(dead_code)]
+fn generator_vs_for_voltage_set(vs: f64) -> Option<f64> {
+    if !vs.is_finite() || vs <= 0.0 {
+        return None;
+    }
+    if (vs - 1.0).abs() <= 0.01 {
+        return None;
+    }
+    Some(vs)
+}
+
+/// Raw QB/QT pair in MVAr from a generator record (swapped if inverted).
+fn generator_q_limits_mvar(generator: &crate::models::Generator) -> Option<(f64, f64)> {
+    let (raw_qmin, raw_qmax) = if generator.qb.is_finite() && generator.qt.is_finite() {
+        if generator.qb > generator.qt {
+            (generator.qt, generator.qb)
+        } else {
+            (generator.qb, generator.qt)
+        }
+    } else {
+        let qmin = if generator.qb.is_finite() {
+            generator.qb
+        } else {
+            0.0
+        };
+        let qmax = if generator.qt.is_finite() {
+            generator.qt
+        } else {
+            0.0
+        };
+        (qmin, qmax)
+    };
+    if raw_qmin == 0.0 && raw_qmax == 0.0 {
+        return None;
+    }
+    Some((raw_qmin, raw_qmax))
 }
 
 fn sanitize_generator_q_limits(raw_q_min: f64, raw_q_max: f64) -> (f64, f64) {

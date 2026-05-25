@@ -27,6 +27,8 @@ $ExportFlags = @(
 )
 
 if (-not $SkipBuild) {
+    $buildPref = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     Write-Host "[build] raptrix-pslf-rs (WSL)..." -ForegroundColor Cyan
     wsl -e bash -lc "cd /mnt/c/Users/matth/OneDrive/repos/raptrix-pslf-rs && cargo build --release --bin raptrix-pslf-rs --bin compare_rpf" | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "pslf-rs WSL build failed" }
@@ -35,7 +37,6 @@ if (-not $SkipBuild) {
         $env:CARGO_TARGET_DIR = "C:\temp\raptrix-psse-rs-target"
     }
     Write-Host "[build] raptrix-psse-rs (target=$env:CARGO_TARGET_DIR)..." -ForegroundColor Cyan
-    $ErrorActionPreference = "Continue"
     Push-Location $PsseRoot
     try {
         & cargo build --release 2>&1 | Out-Host
@@ -43,6 +44,7 @@ if (-not $SkipBuild) {
     } finally {
         Pop-Location
     }
+    $ErrorActionPreference = $buildPref
 }
 
 $PslfBinWsl = "/mnt/c/Users/matth/OneDrive/repos/raptrix-pslf-rs/target/release/raptrix-pslf-rs"
@@ -63,6 +65,9 @@ function Compare-Case {
         [string]$Raw,
         [string]$Dyr
     )
+
+    $casePref = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
 
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Yellow
@@ -112,6 +117,8 @@ function Compare-Case {
         $PsseRpfWsl = ($PsseRpf -replace '\\', '/') -replace '^C:', '/mnt/c' -replace '^c:', '/mnt/c'
         wsl -e bash -lc "$CompareBinWsl '$PslfRpfWsl' '$PsseRpfWsl'" | Out-Host
     }
+
+    $ErrorActionPreference = $casePref
 }
 
 $NetworksDir = Join-Path $PslfRoot "tests\networks"

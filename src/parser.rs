@@ -373,6 +373,8 @@ fn parse_generator_data(
 
 fn merge_generator_continuation(generator: &mut Generator, line: &str) {
     let tokens = tokenize_pslf_line(line);
+    // Continuation token 4 is often VS=1.0 (PSLF placeholder). raptrix-core Texas cases
+    // still need this applied at export for Newton convergence — see docs/pslf-mapping.md.
     if generator.vs <= 0.0 {
         if let Some(vs) = tokens.get(4).and_then(|s| s.parse::<f64>().ok()) {
             if vs > 0.0 {
