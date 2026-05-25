@@ -9,6 +9,12 @@
 #      ../raptrix-core/python_tests/regression/pslf_psse_rpf_parity_harness.py.
 set -euo pipefail
 
+SKIP_BUILD=0
+if [[ "${1:-}" == "--skip-build" ]]; then
+  SKIP_BUILD=1
+  shift
+fi
+
 source "$HOME/.cargo/env" 2>/dev/null || true
 export PATH="$HOME/.cargo/bin:$PATH"
 
@@ -18,10 +24,14 @@ OUT="$PSLF/tests/compare"
 
 mkdir -p "$OUT/pslf" "$OUT/psse"
 
-echo "[build] raptrix-pslf-rs..."
-(cd "$PSLF" && cargo build --release)
-echo "[build] raptrix-psse-rs..."
-(cd "$PSSE" && cargo build --release)
+if [[ "$SKIP_BUILD" -eq 0 ]]; then
+  echo "[build] raptrix-pslf-rs..."
+  (cd "$PSLF" && cargo build --release)
+  echo "[build] raptrix-psse-rs..."
+  (cd "$PSSE" && cargo build --release)
+else
+  echo "[skip-build] using existing release binaries"
+fi
 
 PSLF_BIN="$PSLF/target/release/raptrix-pslf-rs"
 PSSE_BIN="$PSSE/target/release/raptrix-psse-rs"

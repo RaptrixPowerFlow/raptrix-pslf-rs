@@ -7,11 +7,27 @@
 #   2. Append a stanza to the $Cases array below (and the shell script twin).
 #   3. Add the stem to DEFAULT_CASES in
 #      raptrix-core/python_tests/regression/pslf_psse_rpf_parity_harness.py.
+#
+# Usage:
+#   .\scripts\compare-psse-rpf.ps1
+#   .\scripts\compare-psse-rpf.ps1 -SkipBuild
+#   .\scripts\run-compare-psse-rpf.ps1 -SkipBuild
 param(
     [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
+
+function ConvertTo-WslPath {
+    param([string]$Path)
+    $resolved = (Resolve-Path -LiteralPath $Path).Path
+    if ($resolved -match '^([A-Za-z]):\\(.*)$') {
+        $drive = $Matches[1].ToLower()
+        $rest = ($Matches[2] -replace '\\', '/')
+        return "/mnt/$drive/$rest"
+    }
+    return ($resolved -replace '\\', '/')
+}
 
 $PslfRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $PsseRoot = Resolve-Path (Join-Path $PslfRoot "..\raptrix-psse-rs")
@@ -29,8 +45,9 @@ $ExportFlags = @(
 if (-not $SkipBuild) {
     $buildPref = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
+    $PslfRootWsl = ConvertTo-WslPath $PslfRoot
     Write-Host "[build] raptrix-pslf-rs (WSL)..." -ForegroundColor Cyan
-    wsl -e bash -lc "cd /mnt/c/Users/matth/OneDrive/repos/raptrix-pslf-rs && cargo build --release --bin raptrix-pslf-rs --bin compare_rpf" | Out-Host
+    wsl -e bash -lc "cd '$PslfRootWsl' && cargo build --release --bin raptrix-pslf-rs --bin compare_rpf" | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "pslf-rs WSL build failed" }
 
     if (-not $env:CARGO_TARGET_DIR) {
@@ -47,8 +64,9 @@ if (-not $SkipBuild) {
     $ErrorActionPreference = $buildPref
 }
 
-$PslfBinWsl = "/mnt/c/Users/matth/OneDrive/repos/raptrix-pslf-rs/target/release/raptrix-pslf-rs"
-$CompareBinWsl = "/mnt/c/Users/matth/OneDrive/repos/raptrix-pslf-rs/target/release/compare_rpf"
+$PslfRootWsl = ConvertTo-WslPath $PslfRoot
+$PslfBinWsl = "$PslfRootWsl/target/release/raptrix-pslf-rs"
+$CompareBinWsl = "$PslfRootWsl/target/release/compare_rpf"
 $PsseExe = Join-Path $env:CARGO_TARGET_DIR "release\raptrix-psse-rs.exe"
 if (-not (Test-Path $PsseExe)) {
     $PsseExe = Join-Path $PsseRoot "target\release\raptrix-psse-rs.exe"
@@ -85,9 +103,9 @@ function Compare-Case {
 
     $PslfRpf = Join-Path $PslfOut "$Name.rpf"
     $PsseRpf = Join-Path $PsseOut "$Name.rpf"
-    $EpcWsl = ($Epc -replace '\\', '/') -replace '^C:', '/mnt/c' -replace '^c:', '/mnt/c'
-    $DydWsl = if ($Dyd) { ($Dyd -replace '\\', '/') -replace '^C:', '/mnt/c' -replace '^c:', '/mnt/c' } else { $null }
-    $PslfRpfWsl = ($PslfRpf -replace '\\', '/') -replace '^C:', '/mnt/c' -replace '^c:', '/mnt/c'
+    $EpcWsl = ConvertTo-WslPath $Epc
+    $DydWsl = if ($Dyd -and (Test-Path $Dyd)) { ConvertTo-WslPath $Dyd } else { $null }
+    $PslfRpfWsl = ConvertTo-WslPath $PslfRpf
 
     $pslfArgs = @("convert", "--epc", $EpcWsl, "--output", $PslfRpfWsl) + $ExportFlags
     if ($Dyd -and (Test-Path $Dyd)) {
@@ -114,7 +132,7 @@ function Compare-Case {
     }
 
     if ((Test-Path $PslfRpf) -and (Test-Path $PsseRpf)) {
-        $PsseRpfWsl = ($PsseRpf -replace '\\', '/') -replace '^C:', '/mnt/c' -replace '^c:', '/mnt/c'
+        $PsseRpfWsl = ConvertTo-WslPath $PsseRpf
         wsl -e bash -lc "$CompareBinWsl '$PslfRpfWsl' '$PsseRpfWsl'" | Out-Host
     }
 

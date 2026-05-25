@@ -43,9 +43,9 @@ GE PSLF often stores fixed shunt admittance **inline on bus records** or in vend
 |------|----------|----------|------------------|
 | Texas7k | `shunt data [0]` | 205 fixed shunts | PSLF: 0 `fixed_shunts` rows; PSSE: 205 rows |
 
-**PF impact (Texas7k):** After raptrix-core RPF import, summed bus `b_shunt` differs by path (PSLF ~406 pu vs PSSE ~268 pu) because PSLF exports 634 `switched_shunts` rows vs PSSE 429, and raptrix-core absorbs SVD `b_init_pu` into bus effective shunt at import. The extra 138 pu capacitive shunt makes the Jacobian ill-conditioned when generators regulate to correct vsched targets. Additionally, `shunt_switches_applied=0` — core's SVD voltage control is not engaging for PSLF-derived RPFs. Texas7k PSLF does NOT converge with correct vsched; this is a **raptrix-core SVD handling** semantic gap, documented as a known limitation.
+**PF impact (Texas7k):** PSLF exports 634 `switched_shunts` rows vs PSSE 429 (format representation difference). As of **raptrix-core v0.5.44**, import splits each device into a fixed BINIT residual on `bus.b_shunt` plus controllable bank steps, and `planning_full` mode runs a PSS/E-style SVD outer loop decoupled from the NR mismatch gate. Row-count parity is not required; solver-readiness is validated via the parity harness.
 
-Future work: investigate raptrix-core SVD switching logic for PSLF-derived RPFs and/or map inline PSLF bus GL/BL into `fixed_shunts` for full table parity.
+Future work: map any remaining inline PSLF bus GL/BL into `fixed_shunts` if present on EPC bus continuations.
 
 ---
 
@@ -135,7 +135,7 @@ Continuation lines (`/` suffix) carry `vs` at token index 4 when absent on the p
 
 **Known semantic gap vs PSSE-derived RPF:** PSS/E RAW stores explicit VS per machine; PSLF EPC encodes the target as `bus.vsched`. After the vsched fix both approaches reflect the true regulation target. PSS/E may also export `(0,0)` Q limits for machines with missing RAW fields; PSLF skips those for bus aggregation.
 
-**Texas7k convergence with correct vsched:** Texas7k PSLF RPF does NOT converge with raptrix-core (17 iters, 30 pu mismatch) even with the correct vsched setpoints. Root cause: raptrix-core absorbs SVD `b_init_pu` into bus effective shunt at import, resulting in ~406 pu total capacitive reactive (vs ~268 pu for PSSE). The extra 138 pu makes the DC-init Jacobian ill-conditioned for the PSLF model. Additionally, `shunt_switches_applied=0` — core's SVD voltage control is not engaging. This is a raptrix-core SVD handling semantic gap, not an export bug. Texas2k and ACTIVSg cases unaffected (smaller SVD b_init totals).
+**Texas7k convergence with correct vsched:** **raptrix-core v0.5.44** adds RPF `default_shunt_control_mode` propagation, STAT=0 fixed-only SVD import, and a post-converge planning SVD outer loop. **PSSE-derived Texas7k RPF converges** with planning_full. **PSLF-derived Texas7k RPF still stalls ~30 pu** — the 634-vs-429 SVD device reactive baseline remains a format representation gap requiring further core import aggregation work (not an export bug).
 
 ---
 
@@ -153,7 +153,7 @@ Do **not** force PSSE/PSLF RPF row-count identity. These gaps are acceptable whe
 | `dynamics_models` | DYD row count | DYR row count | Dynamics only |
 | Generator `v_mag_set` | `bus.vsched` (~1.02–1.04) — **fixed** | RAW VS / bus VM | Correct fidelity; Texas7k still diverges (SVD b_shunt) |
 | Bus `type` | type-2 from `has_generator` — **fixed** | Explicit RAW bus type | Core Q-switch now engages for Texas2k |
-| Texas7k solver-readiness | Not solver-ready (SVD b_shunt + shunt_sw=0) | Solver-ready | Requires raptrix-core SVD switching fix |
+| Texas7k solver-readiness | Not solver-ready (PSLF NR ~30pu stall) | Solver-ready (core v0.5.44) | PSLF format SVD baseline gap |
 | Texas2k_series25 | Solver-ready (0 v-violations, 110 Q-sw) | Solver-ready | parity dv≈0.077 (model semantic gap) |
 | Texas2k_series24 | Converges; 1–14 buses >1.1 pu | Solver-ready | Marginal violations; PSLF/PSSE model differences |
 | ACTIVSg10k/70k | Not converged (expected) | Not converged (expected) | IBR structural; LM+continuation also fails |
