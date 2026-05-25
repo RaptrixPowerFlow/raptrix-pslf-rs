@@ -87,6 +87,26 @@ Use `from_bus` nominal kV for lines; `max(from_kv, to_kv)` for transformers.
 
 ---
 
+## Generators
+
+EPC `generator data` primary line (after `:`) token indices relative to the colon:
+
+| Field | Token offset | PSSE RAW analogue |
+|-------|--------------|-------------------|
+| `status` | `+1` | STAT |
+| `ireg` | `+2` | IREG (remote regulation bus) |
+| `pg` | `+9` | PG |
+| `pt` | `+10` | PT |
+| `pb` | `+11` | PB |
+| `qg` | `+12` | QG |
+| `qt` | `+13` | QT (qmax in EPC header) |
+| `qb` | `+14` | QB (qmin in EPC header) |
+| `mbase` | `+15` | MBASE |
+
+Continuation lines (`/` suffix) may carry `vs` at token index 2 when not present on the primary row. Bus-level `q_min` / `q_max` aggregate in-service machines (swap when QB>QT, mirror psse-rs).
+
+---
+
 ## Table-by-Table Mapping (Work in Progress)
 
 This section will be populated as each `build_*_batch` function is implemented. It will mirror the style and depth of `docs/psse-mapping.md` in the sibling crate.

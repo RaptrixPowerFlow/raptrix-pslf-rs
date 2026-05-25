@@ -60,6 +60,16 @@ fn pslf_parser_and_writer_smoke() -> Result<()> {
         "gen 111180 pg should be ~643 MW, got {}",
         generator.pg
     );
+    assert!(
+        (generator.qt - 379.710).abs() < 0.1,
+        "gen 111180 qt: got {}",
+        generator.qt
+    );
+    assert!(
+        (generator.qb - (-250.067)).abs() < 0.1,
+        "gen 111180 qb: got {}",
+        generator.qb
+    );
 
     let tmp = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
     let tmp_str = tmp.to_string_lossy();
@@ -167,6 +177,32 @@ fn transformer_ps_impedance_from_epc_header() -> Result<()> {
         (xfmr_345.to_kv - 345.0).abs() < 0.1,
         "to_kv: got {}",
         xfmr_345.to_kv
+    );
+    Ok(())
+}
+
+#[test]
+fn series25_switched_shunt_row_count_matches_psse() -> Result<()> {
+    let epc = "tests/networks/Texas2k_series25_case1_summerpeak.EPC";
+    if !file_exists(epc) {
+        eprintln!("[test] Skipping SVD count test — proprietary EPC not present");
+        return Ok(());
+    }
+
+    let net = raptrix_pslf_rs::parser::parse_epc(Path::new(epc))?;
+    assert_eq!(
+        net.switched_shunts.len(),
+        202,
+        "parsed switched_shunts count (expect one EPC record per device, matching PSSE RAW)"
+    );
+
+    let tmp = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
+    raptrix_pslf_rs::write_pslf_to_rpf(epc, None, &tmp.to_string_lossy())?;
+    let summary = summarize_rpf(&tmp)?;
+    assert_eq!(
+        summary.table_rows(raptrix_cim_arrow::TABLE_SWITCHED_SHUNTS),
+        Some(202),
+        "exported switched_shunts row count"
     );
     Ok(())
 }

@@ -346,14 +346,17 @@ fn parse_generator_data(
     mut start: usize,
     gens: &mut Vec<Generator>,
 ) -> Result<usize> {
-    let mut skip_next = false;
+    let mut pending_continuation = false;
     while start < lines.len() {
         let line = lines[start].trim();
         if line.is_empty() || line.starts_with('!') || is_known_section_header(line) {
             return Ok(start);
         }
-        if skip_next {
-            skip_next = false;
+        if pending_continuation {
+            if let Some(last) = gens.last_mut() {
+                merge_generator_continuation(last, line);
+            }
+            pending_continuation = false;
             start += 1;
             continue;
         }
@@ -361,11 +364,22 @@ fn parse_generator_data(
             gens.push(generator);
         }
         if line_has_continuation(line) {
-            skip_next = true;
+            pending_continuation = true;
         }
         start += 1;
     }
     Ok(start)
+}
+
+fn merge_generator_continuation(generator: &mut Generator, line: &str) {
+    let tokens = tokenize_pslf_line(line);
+    if generator.vs <= 0.0 {
+        if let Some(vs) = tokens.get(4).and_then(|s| s.parse::<f64>().ok()) {
+            if vs > 0.0 {
+                generator.vs = vs;
+            }
+        }
+    }
 }
 
 fn parse_one_generator_line(line: &str) -> Option<Generator> {
@@ -391,6 +405,18 @@ fn parse_one_generator_line(line: &str) -> Option<Generator> {
             .get(colon_pos + 12)
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.0),
+        qt: tokens
+            .get(colon_pos + 13)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0),
+        qb: tokens
+            .get(colon_pos + 14)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0),
+        ireg: tokens
+            .get(colon_pos + 2)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0),
         mbase: tokens
             .get(colon_pos + 15)
             .and_then(|s| s.parse().ok())

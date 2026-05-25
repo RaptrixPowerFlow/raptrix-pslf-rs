@@ -474,6 +474,11 @@ pub fn build_buses_batch(
         } else {
             sanitize_bus_voltage(bus.volt, bus.angle)
         };
+        let mut q_min_val = agg.q_min;
+        let mut q_max_val = agg.q_max;
+        if q_min_val > q_max_val {
+            std::mem::swap(&mut q_min_val, &mut q_max_val);
+        }
 
         bus_id.append_value(bus.number as i32);
         name.append_value(bus.name.as_ref());
@@ -482,8 +487,8 @@ pub fn build_buses_batch(
         q_sched.append_value(agg.q_sched);
         v_mag_set.append_value(v_mag);
         v_ang_set.append_value(v_ang);
-        q_min.append_value(agg.q_min);
-        q_max.append_value(agg.q_max);
+        q_min.append_value(q_min_val);
+        q_max.append_value(q_max_val);
         g_shunt.append_value(agg.g_shunt);
         b_shunt.append_value(agg.b_shunt);
         area.append_value(bus.area as i32);
@@ -1338,9 +1343,6 @@ pub fn consolidate_switched_shunts_by_bus(mut shunts: Vec<SwitchedShunt>) -> Vec
 }
 
 pub fn prepare_network_for_export(network: &mut Network) {
-    network.switched_shunts = consolidate_switched_shunts_by_bus(std::mem::take(
-        &mut network.switched_shunts,
-    ));
     derive_switched_shunt_banks(network);
 }
 

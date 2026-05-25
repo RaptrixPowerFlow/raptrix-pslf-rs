@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 # Generate PSLF and PSS/E RPF files for matching Texas cases and compare summaries.
+#
+# Adding a new dual-format case:
+#   1. Add EPC (+ optional DYD) under tests/networks/ and RAW (+ DYR) under
+#      ../raptrix-psse-rs/tests/data/external/ with the same stem.
+#   2. Append a compare_case stanza below (and the PowerShell script twin).
+#   3. Add the stem to DEFAULT_CASES in
+#      ../raptrix-core/python_tests/regression/pslf_psse_rpf_parity_harness.py.
 set -euo pipefail
 
 source "$HOME/.cargo/env" 2>/dev/null || true
@@ -87,6 +94,36 @@ compare_case "Texas2k_series24_case2_2016lowload" \
   "$PSLF/tests/networks/Texas2k_series24_case2_2016lowload.dyd" \
   "$PSSE/tests/data/external/Texas2k_series24_case2_2016lowload.RAW" \
   "$PSSE/tests/data/external/Texas2k_series24_case2_2016lowload.dyr"
+
+compare_case "Texas2k_series24_case6_2024lowloadwithgfm" \
+  "$PSLF/tests/networks/Texas2k_series24_case6_2024lowloadwithgfm.EPC" \
+  "$PSLF/tests/networks/Texas2k_series24_case6_2024lowloadwithgfm.dyd" \
+  "$PSSE/tests/data/external/Texas2k_series24_case6_2024lowloadwithgfm.RAW" \
+  "$PSSE/tests/data/external/Texas2k_series24_case6_2024lowloadwithgfm.dyr"
+
+compare_case "Texas2k_series24_case4_2024lowload" \
+  "$PSLF/tests/networks/Texas2k_series24_case4_2024lowload.EPC" \
+  "$PSLF/tests/networks/Texas2k_series24_case4_2024lowload.dyd" \
+  "$PSSE/tests/data/external/Texas2k_series24_case4_2024lowload.RAW" \
+  "$PSSE/tests/data/external/Texas2k_series24_case4_2024lowload.dyr"
+
+compare_case "Texas2k_series24_case1_2016summerPeak" \
+  "$PSLF/tests/networks/Texas2k_series24_case1_2016summerPeak.EPC" \
+  "$PSLF/tests/networks/Texas2k_series24_case1_2016summerPeak.dyd" \
+  "$PSSE/tests/data/external/Texas2k_series24_case1_2016summerPeak.RAW" \
+  "$PSSE/tests/data/external/Texas2k_series24_case1_2016summerPeak.dyr"
+
+compare_case "ACTIVSg10k" \
+  "$PSLF/tests/networks/ACTIVSg10k.EPC" \
+  "$PSLF/tests/networks/ACTIVSg10k_dynamics.dyd" \
+  "$PSSE/tests/data/external/ACTIVSg10k.RAW" \
+  "$PSSE/tests/data/external/ACTIVSg10k_dynamics.dyr"
+
+compare_case "ACTIVSg70k" \
+  "$PSLF/tests/networks/ACTIVSg70k.EPC" \
+  "$PSLF/tests/networks/ACTIVSg70k_dynamics.dyd" \
+  "$PSSE/tests/data/external/ACTIVSg70k.RAW" \
+  "$PSSE/tests/data/external/ACTIVSg70k_dynamics.dyr"
 
 echo ""
 echo "Done. RPF files written to:"

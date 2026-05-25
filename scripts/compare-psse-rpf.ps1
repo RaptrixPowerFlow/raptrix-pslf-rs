@@ -1,5 +1,12 @@
 # Generate PSLF and PSS/E RPF files for matching Texas cases and compare summaries.
 # Windows twin of compare-psse-rpf.sh with aligned export metadata flags.
+#
+# Adding a new dual-format case:
+#   1. Add EPC (+ optional DYD) under tests/networks/ and RAW (+ DYR) under
+#      raptrix-psse-rs/tests/data/external/ with the same stem.
+#   2. Append a stanza to the $Cases array below (and the shell script twin).
+#   3. Add the stem to DEFAULT_CASES in
+#      raptrix-core/python_tests/regression/pslf_psse_rpf_parity_harness.py.
 param(
     [switch]$SkipBuild
 )
@@ -28,6 +35,7 @@ if (-not $SkipBuild) {
         $env:CARGO_TARGET_DIR = "C:\temp\raptrix-psse-rs-target"
     }
     Write-Host "[build] raptrix-psse-rs (target=$env:CARGO_TARGET_DIR)..." -ForegroundColor Cyan
+    $ErrorActionPreference = "Continue"
     Push-Location $PsseRoot
     try {
         & cargo build --release 2>&1 | Out-Host
@@ -137,6 +145,41 @@ $Cases = @(
         Dyd  = Join-Path $NetworksDir "Texas2k_series24_case2_2016lowload.dyd"
         Raw  = Join-Path $ExternalDir "Texas2k_series24_case2_2016lowload.RAW"
         Dyr  = Join-Path $ExternalDir "Texas2k_series24_case2_2016lowload.dyr"
+    },
+    @{
+        Name = "Texas2k_series24_case6_2024lowloadwithgfm"
+        Epc  = Join-Path $NetworksDir "Texas2k_series24_case6_2024lowloadwithgfm.EPC"
+        Dyd  = Join-Path $NetworksDir "Texas2k_series24_case6_2024lowloadwithgfm.dyd"
+        Raw  = Join-Path $ExternalDir "Texas2k_series24_case6_2024lowloadwithgfm.RAW"
+        Dyr  = Join-Path $ExternalDir "Texas2k_series24_case6_2024lowloadwithgfm.dyr"
+    },
+    @{
+        Name = "Texas2k_series24_case4_2024lowload"
+        Epc  = Join-Path $NetworksDir "Texas2k_series24_case4_2024lowload.EPC"
+        Dyd  = Join-Path $NetworksDir "Texas2k_series24_case4_2024lowload.dyd"
+        Raw  = Join-Path $ExternalDir "Texas2k_series24_case4_2024lowload.RAW"
+        Dyr  = Join-Path $ExternalDir "Texas2k_series24_case4_2024lowload.dyr"
+    },
+    @{
+        Name = "Texas2k_series24_case1_2016summerPeak"
+        Epc  = Join-Path $NetworksDir "Texas2k_series24_case1_2016summerPeak.EPC"
+        Dyd  = Join-Path $NetworksDir "Texas2k_series24_case1_2016summerPeak.dyd"
+        Raw  = Join-Path $ExternalDir "Texas2k_series24_case1_2016summerPeak.RAW"
+        Dyr  = Join-Path $ExternalDir "Texas2k_series24_case1_2016summerPeak.dyr"
+    },
+    @{
+        Name = "ACTIVSg10k"
+        Epc  = Join-Path $NetworksDir "ACTIVSg10k.EPC"
+        Dyd  = Join-Path $NetworksDir "ACTIVSg10k_dynamics.dyd"
+        Raw  = Join-Path $ExternalDir "ACTIVSg10k.RAW"
+        Dyr  = Join-Path $ExternalDir "ACTIVSg10k_dynamics.dyr"
+    },
+    @{
+        Name = "ACTIVSg70k"
+        Epc  = Join-Path $NetworksDir "ACTIVSg70k.EPC"
+        Dyd  = Join-Path $NetworksDir "ACTIVSg70k_dynamics.dyd"
+        Raw  = Join-Path $ExternalDir "ACTIVSg70k.RAW"
+        Dyr  = Join-Path $ExternalDir "ACTIVSg70k_dynamics.dyr"
     }
 )
 
