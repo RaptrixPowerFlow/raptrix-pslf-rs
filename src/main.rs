@@ -107,11 +107,11 @@ fn main() -> Result<()> {
             let transformer_representation_mode =
                 raptrix_pslf_rs::TransformerRepresentationMode::from_cli_value(&transformer_mode)
                     .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "invalid --transformer-mode '{}'; expected one of: expanded, native-3w",
-                            transformer_mode
-                        )
-                    })?;
+                    anyhow::anyhow!(
+                        "invalid --transformer-mode '{}'; expected one of: expanded, native-3w",
+                        transformer_mode
+                    )
+                })?;
 
             let export_options = raptrix_pslf_rs::ExportOptions {
                 transformer_representation_mode,

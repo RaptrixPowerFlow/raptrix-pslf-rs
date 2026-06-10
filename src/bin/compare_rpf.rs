@@ -69,7 +69,10 @@ fn compare(left: &Path, right: &Path, bus_id: Option<i32>) -> Result<()> {
         .collect();
 
     let mut mismatches = 0usize;
-    println!("{:<30} {:>10} {:>10} {:>8}", "table", "left", "right", "match");
+    println!(
+        "{:<30} {:>10} {:>10} {:>8}",
+        "table", "left", "right", "match"
+    );
     println!("{}", "-".repeat(62));
     for table in all_tables.keys() {
         let l = left_map.get(table).copied().unwrap_or(0);

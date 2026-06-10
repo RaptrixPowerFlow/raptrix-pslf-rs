@@ -16,8 +16,8 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 use crate::models::{
-    Area, Bus, DydGeneratorData, DydModelData, FixedShunt, Generator, Load, Network, Owner, SwitchedShunt,
-    Transformer2W, Zone,
+    Area, Bus, DydGeneratorData, DydModelData, FixedShunt, Generator, Load, Network, Owner,
+    SwitchedShunt, Transformer2W, Zone,
 };
 
 /// Parse a GE PSLF .epc file.
@@ -25,10 +25,7 @@ pub fn parse_epc(path: &Path) -> Result<Network> {
     let file = fs::File::open(path)
         .with_context(|| format!("failed to open EPC file: {}", path.display()))?;
     let reader = BufReader::new(file);
-    let lines: Vec<String> = reader
-        .lines()
-        .map(|l| l.unwrap_or_default())
-        .collect();
+    let lines: Vec<String> = reader.lines().map(|l| l.unwrap_or_default()).collect();
 
     let mut network = Network {
         title: "".into(),
@@ -498,7 +495,6 @@ fn parse_one_branch_line(line: &str) -> Option<crate::models::Branch> {
             .unwrap_or(1),
         from_name: tokens.get(1).map(String::as_str).unwrap_or("").into(),
         to_name: tokens.get(4).map(String::as_str).unwrap_or("").into(),
-        ..Default::default()
     })
 }
 
@@ -528,10 +524,8 @@ fn parse_transformer_data(
             start += 4;
             continue;
         }
-        if let Some((_, t3)) = parse_one_transformer_line(line) {
-            if let Some(xfmr) = t3 {
-                t3w.push(xfmr);
-            }
+        if let Some((_, Some(xfmr))) = parse_one_transformer_line(line) {
+            t3w.push(xfmr);
         }
         start += 1;
     }

@@ -16,7 +16,10 @@ use std::path::Path;
 
 use anyhow::Result;
 use arrow::array::{Float64Array, Int8Array, Int32Array};
-use raptrix_cim_arrow::{TABLE_BUSES, TABLE_GENERATORS, TABLE_LOADS, read_rpf_tables, summarize_rpf};
+use raptrix_cim_arrow::{
+    RPF_VERSION, TABLE_BUSES, TABLE_GENERATORS, TABLE_LOADS, read_rpf_tables, rpf_file_metadata,
+    summarize_rpf,
+};
 
 const EPC_PATH: &str = "tests/networks/Texas7k_20210804.EPC";
 const DYD_PATH: &str = "tests/networks/Texas7k_20210804.dyd";
@@ -78,6 +81,16 @@ fn pslf_parser_and_writer_smoke() -> Result<()> {
 
     raptrix_pslf_rs::write_pslf_to_rpf(EPC_PATH, Some(DYD_PATH), &tmp_str)?;
 
+    let metadata = rpf_file_metadata(&tmp)?;
+    let rpf_version = metadata
+        .get("rpf_version")
+        .map(|v| v.as_str())
+        .unwrap_or("");
+    assert_eq!(
+        rpf_version, RPF_VERSION,
+        "rpf_version mismatch: expected {RPF_VERSION}, got {rpf_version}"
+    );
+
     let summary = summarize_rpf(&tmp)?;
     assert!(summary.total_rows > 0, "produced RPF should have rows");
     assert_eq!(summary.table_rows(TABLE_BUSES), Some(6717), "RPF bus count");
@@ -94,7 +107,9 @@ fn pslf_parser_and_writer_smoke() -> Result<()> {
     assert!(summary.tables.iter().any(|t| t.table_name == TABLE_BUSES));
 
     let tables: BTreeMap<_, _> = read_rpf_tables(&tmp)?.into_iter().collect();
-    let buses = tables.get(TABLE_BUSES).expect("buses table in exported RPF");
+    let buses = tables
+        .get(TABLE_BUSES)
+        .expect("buses table in exported RPF");
     let bus_id_col = buses
         .column_by_name("bus_id")
         .expect("bus_id column")
@@ -260,16 +275,8 @@ fn transformer_ps_impedance_from_epc_header() -> Result<()> {
         .iter()
         .find(|t| t.from_bus == 110001 && t.to_bus == 110004)
         .expect("transformer 110001-110004");
-    assert!(
-        (xfmr.r - 1.440e-3).abs() < 1.0e-6,
-        "ps_r: got {}",
-        xfmr.r
-    );
-    assert!(
-        (xfmr.x - 4.775e-2).abs() < 1.0e-5,
-        "ps_x: got {}",
-        xfmr.x
-    );
+    assert!((xfmr.r - 1.440e-3).abs() < 1.0e-6, "ps_r: got {}", xfmr.r);
+    assert!((xfmr.x - 4.775e-2).abs() < 1.0e-5, "ps_x: got {}", xfmr.x);
     assert!(
         (xfmr.rate_a - 245.7).abs() < 0.1,
         "rate_a: got {}",

@@ -9,21 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- Project scaffold: exact structural and stylistic mirror of `raptrix-psse-rs` v0.4.0.
-- CLI skeleton with `--epc` / `--dyd` (user-chosen closest parallel to psse-rs `--raw` / `--dyr`), `convert`, `view`, and `validate` subcommands.
-- Strong `.gitignore` protecting CEII/proprietary `tests/networks/` and all vendor powerflow formats.
-- MPL-2.0 license and initial documentation aligned with the Raptrix Suite marketing guide.
-
-### Notes
-- First public version will be tagged after parser + full table export parity is achieved.
-- `raptrix-cim-arrow` pinned to the same rev as current psse-rs for interchange compatibility.
+_No user-facing changes yet._
 
 ---
 
-## [0.1.0] — Initial Release (target)
+## [0.5.3] - 2026-06-10
 
-- Full EPC + DYD parser.
-- Complete mapping to all 18 canonical RPF v0.10.0 tables + dynamics.
-- Cross-tool equivalence tests with psse-rs on overlapping Texas cases.
-- Packaging scripts and pre-release hygiene parity.
+### RPF **v0.12.1** (`raptrix-cim-arrow` **0.5.3**)
+
+- **Emit-only v0.12.1**: every `.rpf` from this crate carries `raptrix.version` / contract **v0.12.1** (via `raptrix-cim-arrow::SCHEMA_VERSION`). Optional `remedial_action_schemes` / `contingency_island_analysis` root tables are not emitted on the standard PSLF path.
+- **Export parity** with `raptrix-psse-rs` v0.12.1: metadata modern-grid flags, generator `params` maps, branch/transformer nominal kV resolution (opposite-bus fallback), `generators.controlled_bus_id` IREG semantics, full `transformers_3w` schema columns, root metadata keys (`rpf.case_mode`, `rpf.default_shunt_control_mode`, `rpf.loads.zip_fidelity_presence`, etc.), and pre-write export invariant checks.
+- **`SUPPORTED_RPF_VERSIONS`** in the linked crate accepts **only** **v0.12.1** / **0.12.1** — re-export all cached `.rpf` files.
+- **Dependency**: `raptrix-cim-arrow` **0.5.3** / git **`298f9958cb9a551e273257f045bcadc1c72cf7bb`**.
+- **CI**: GitHub workflows for fmt/clippy/test, version consistency, and public-safety hygiene (mirrors `raptrix-psse-rs`).
+
+---
+
+## [0.1.0] — Initial scaffold
+
+- Project scaffold mirroring `raptrix-psse-rs` architecture.
+- EPC + DYD parser and canonical RPF export for Texas reference cases.
+- Cross-tool row-count parity tests with `raptrix-psse-rs` where cases overlap.

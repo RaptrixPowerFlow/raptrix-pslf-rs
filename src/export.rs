@@ -3,10 +3,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use arrow::array::{
-    BooleanBuilder, Float64Builder, Int8Builder, Int32Builder, ListBuilder, MapBuilder, MapFieldNames,
-    StringBuilder, StringDictionaryBuilder, new_null_array,
+    BooleanArray, BooleanBuilder, Float64Array, Float64Builder, Int8Builder, Int32Array,
+    Int32Builder, ListBuilder, MapBuilder, MapFieldNames, StringBuilder, StringDictionaryBuilder,
+    new_null_array,
 };
 use arrow::datatypes::{Int32Type, UInt32Type};
 use arrow::record_batch::RecordBatch;
@@ -19,10 +20,25 @@ use raptrix_cim_arrow::{
 };
 
 use crate::models::{
-    Area, Branch, Bus, DydGeneratorData, DydModelData, FixedShunt, Generator, Load, Network,
-    Owner, SwitchedShunt, SwitchedShuntBankRow, Transformer2W, Transformer3W, Zone,
+    Area, Branch, Bus, DydGeneratorData, DydModelData, FixedShunt, Generator, Load, Network, Owner,
+    SwitchedShunt, SwitchedShuntBankRow, Transformer2W, Transformer3W, Zone,
 };
-use crate::ExportOptions;
+use crate::{ExportOptions, TransformerRepresentationMode};
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GeneratorQSanitizationStats {
+    pub swapped_q_limits: usize,
+    pub clamped_nonfinite_q_min: usize,
+    pub clamped_nonfinite_q_max: usize,
+}
+
+impl GeneratorQSanitizationStats {
+    pub fn is_empty(self) -> bool {
+        self.swapped_q_limits == 0
+            && self.clamped_nonfinite_q_min == 0
+            && self.clamped_nonfinite_q_max == 0
+    }
+}
 
 pub fn empty_table(name: &'static str) -> Result<RecordBatch> {
     let schema =
@@ -214,14 +230,130 @@ fn generator_q_limits_mvar(generator: &crate::models::Generator) -> Option<(f64,
     Some((raw_qmin, raw_qmax))
 }
 
-fn sanitize_generator_q_limits(raw_q_min: f64, raw_q_max: f64) -> (f64, f64) {
-    let qmin = if raw_q_min.is_finite() { raw_q_min } else { 0.0 };
-    let qmax = if raw_q_max.is_finite() { raw_q_max } else { 0.0 };
+fn sanitize_generator_q_limits(
+    raw_q_min: f64,
+    raw_q_max: f64,
+    stats: &mut GeneratorQSanitizationStats,
+) -> (f64, f64) {
+    let qmin = if raw_q_min.is_finite() {
+        raw_q_min
+    } else {
+        stats.clamped_nonfinite_q_min += 1;
+        0.0
+    };
+    let qmax = if raw_q_max.is_finite() {
+        raw_q_max
+    } else {
+        stats.clamped_nonfinite_q_max += 1;
+        0.0
+    };
     if qmin > qmax {
+        stats.swapped_q_limits += 1;
         (qmax, qmin)
     } else {
         (qmin, qmax)
     }
+}
+
+fn append_pslf_generator_raw_params(
+    params: &mut MapBuilder<StringBuilder, Float64Builder>,
+    machine: &Generator,
+) -> Result<()> {
+    let mut push = |k: &str, v: f64| -> Result<()> {
+        params.keys().append_value(k);
+        params.values().append_value(v);
+        Ok(())
+    };
+    push("vs", machine.vs)?;
+    if machine.ireg > 0 {
+        push("ireg", machine.ireg as f64)?;
+    }
+    push("qg", machine.qg)?;
+    Ok(())
+}
+
+fn canonical_ibr_subtype(model_family: &str) -> &'static str {
+    let fam = model_family.to_ascii_lowercase();
+    if fam.contains("bess") || fam.contains("battery") {
+        "battery"
+    } else if fam.contains("solar") || fam.contains("pv") {
+        "solar"
+    } else if fam.contains("wind") {
+        "wind"
+    } else {
+        "generic_ibr"
+    }
+}
+
+pub fn compute_ibr_subtype_by_generator(network: &Network) -> HashMap<(u32, String), String> {
+    let mut out = HashMap::new();
+    for generator in &network.generators {
+        if generator.status == 0 {
+            continue;
+        }
+        let key = (generator.bus, generator.id.to_string());
+        if let Some(dg) = network
+            .dyd_generators
+            .iter()
+            .find(|dg| dg.bus_id == generator.bus && dg.id.as_ref() == generator.id.as_ref())
+        {
+            if dg.is_ibr {
+                out.insert(
+                    key,
+                    canonical_ibr_subtype(dg.model_family.as_ref()).to_string(),
+                );
+            }
+        }
+    }
+    out
+}
+
+pub fn classify_loads_zip_fidelity_presence(_loads: &[Load]) -> &'static str {
+    "not_available"
+}
+
+fn resolve_required_branch_nominal_kv(
+    primary_bus_id: u32,
+    opposite_bus_id: u32,
+    bus_nominal_kv: &HashMap<u32, f64>,
+    field: &str,
+) -> Result<f64> {
+    if let Some(kv) = bus_nominal_kv.get(&primary_bus_id).copied() {
+        return Ok(kv);
+    }
+    if let Some(kv) = bus_nominal_kv.get(&opposite_bus_id).copied() {
+        return Ok(kv);
+    }
+    bail!(
+        "schema requires non-null {field}; no valid nominal kV found for bus {primary_bus_id} or opposite bus {opposite_bus_id}"
+    );
+}
+
+fn resolve_required_transformer_nominal_kv(
+    declared_nominal_kv: f64,
+    primary_bus_id: u32,
+    opposite_bus_id: u32,
+    bus_nominal_kv: &HashMap<u32, f64>,
+    field: &str,
+) -> Result<f64> {
+    if declared_nominal_kv > 0.0 {
+        return Ok(declared_nominal_kv);
+    }
+    if let Some(kv) = bus_nominal_kv.get(&primary_bus_id).copied() {
+        return Ok(kv);
+    }
+    if let Some(kv) = bus_nominal_kv.get(&opposite_bus_id).copied() {
+        return Ok(kv);
+    }
+    bail!(
+        "schema requires non-null {field}; no valid nominal kV found for bus {primary_bus_id} or opposite bus {opposite_bus_id}"
+    );
+}
+
+fn generator_controlled_bus_id(machine: &Generator) -> i32 {
+    let bus = machine.bus as i32;
+    let ireg = machine.ireg as i32;
+    if ireg == 0 || ireg == bus { 0 } else { ireg }
 }
 
 fn infer_study_purpose(title: &str) -> Option<String> {
@@ -255,16 +387,12 @@ fn infer_scenario_tags(title: &str) -> Vec<String> {
     tags
 }
 
-fn generator_is_ibr(generator: &Generator, dyd_generators: &[DydGeneratorData]) -> bool {
-    dyd_generators
-        .iter()
-        .any(|dg| dg.bus_id == generator.bus && dg.is_ibr)
-}
-
 pub fn build_metadata_batch(
     network: &Network,
     case_fingerprint_value: &str,
     case_mode: &str,
+    solved_state_presence: &str,
+    ibr_subtype_by_gen: &HashMap<(u32, String), String>,
     options: &ExportOptions,
 ) -> Result<RecordBatch> {
     let now_utc = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
@@ -273,7 +401,7 @@ pub fn build_metadata_batch(
     let base_mva = arrow::array::Float64Array::from(vec![network.sbase]);
     let frequency_hz = arrow::array::Float64Array::from(vec![60.0]);
     let psse_version = arrow::array::Int32Array::from(vec![0]);
-    let is_planning_case = arrow::array::BooleanArray::from(vec![false]);
+    let is_planning_case = arrow::array::BooleanArray::from(vec![true]);
 
     let mut study_name = StringDictionaryBuilder::<Int32Type>::new();
     study_name.append_value(network.title.as_ref());
@@ -302,7 +430,7 @@ pub fn build_metadata_batch(
     case_mode_arr.append_value(case_mode);
 
     let mut solved_state_presence_arr = StringDictionaryBuilder::<Int32Type>::new();
-    solved_state_presence_arr.append_value("not_computed");
+    solved_state_presence_arr.append_value(solved_state_presence);
 
     let mut solver_version_arr = StringBuilder::new();
     solver_version_arr.append_null();
@@ -320,8 +448,13 @@ pub fn build_metadata_batch(
     let mut solved_shunt_state_presence_arr = StringDictionaryBuilder::<Int32Type>::new();
     solved_shunt_state_presence_arr.append_null();
 
-    let has_ibr_value = network.dyd_generators.iter().any(|dg| dg.is_ibr);
-    let modern_grid_profile_value = has_ibr_value;
+    let has_ibr_value = !ibr_subtype_by_gen.is_empty();
+    let has_smart_valve_value = false;
+    let has_multi_terminal_dc_value = !network.dc_converters.is_empty();
+    let modern_grid_profile_value = has_ibr_value
+        || has_smart_valve_value
+        || has_multi_terminal_dc_value
+        || !network.dc_buses.is_empty();
 
     let total_pmax_mw: f64 = network
         .generators
@@ -333,7 +466,7 @@ pub fn build_metadata_batch(
         .generators
         .iter()
         .filter(|g| g.status != 0)
-        .filter(|g| generator_is_ibr(g, &network.dyd_generators))
+        .filter(|g| ibr_subtype_by_gen.contains_key(&(g.bus, g.id.to_string())))
         .map(|g| g.pt.max(0.0))
         .sum();
     let mut ibr_penetration_pct_arr = Float64Builder::new();
@@ -423,11 +556,17 @@ pub fn build_metadata_batch(
             Arc::new(slack_bus_id_solved_arr.finish()),
             Arc::new(angle_reference_deg_arr.finish()),
             Arc::new(solved_shunt_state_presence_arr.finish()),
-            Arc::new(arrow::array::BooleanArray::from(vec![modern_grid_profile_value])),
+            Arc::new(arrow::array::BooleanArray::from(vec![
+                modern_grid_profile_value,
+            ])),
             Arc::new(ibr_penetration_pct_arr.finish()),
             Arc::new(arrow::array::BooleanArray::from(vec![has_ibr_value])),
-            Arc::new(arrow::array::BooleanArray::from(vec![false])),
-            Arc::new(arrow::array::BooleanArray::from(vec![false])),
+            Arc::new(arrow::array::BooleanArray::from(vec![
+                has_smart_valve_value,
+            ])),
+            Arc::new(arrow::array::BooleanArray::from(vec![
+                has_multi_terminal_dc_value,
+            ])),
             Arc::new(study_purpose_arr.finish()),
             Arc::new(scenario_tags_arr.finish()),
             Arc::new(hour_ahead_uncertainty_band.finish()),
@@ -493,7 +632,11 @@ pub fn build_buses_batch(
         // attached devices). Infer type-2 (PV) from generator presence so that raptrix-core's
         // Q-switch mechanism fires correctly. Type-3 (slack) is auto-assigned by core when no
         // explicit swing bus is present in the EPC (area swing_bus=0 for Texas cases).
-        let type_code = if agg.has_generator { 2i8 } else { canonical_bus_type_code(bus.ty) };
+        let type_code = if agg.has_generator {
+            2i8
+        } else {
+            canonical_bus_type_code(bus.ty)
+        };
         bus_type.append_value(type_code);
         p_sched.append_value(agg.p_sched);
         q_sched.append_value(agg.q_sched);
@@ -553,6 +696,8 @@ pub fn build_buses_batch(
 pub fn build_generators_batch(
     generators: &[Generator],
     dyd_generators: &[DydGeneratorData],
+    ibr_subtype_by_gen: &HashMap<(u32, String), String>,
+    sanitization_stats: &mut GeneratorQSanitizationStats,
 ) -> Result<RecordBatch> {
     let schema = Arc::new(table_schema(TABLE_GENERATORS).expect("generators schema must exist"));
 
@@ -593,9 +738,11 @@ pub fn build_generators_batch(
     );
 
     for (idx, generator) in generators.iter().enumerate() {
-        let ibr = generator_is_ibr(generator, dyd_generators);
+        let key = (generator.bus, generator.id.to_string());
+        let subtype = ibr_subtype_by_gen.get(&key).cloned();
+        let ibr = subtype.is_some();
         let (q_min_export, q_max_export) =
-            sanitize_generator_q_limits(generator.qb, generator.qt);
+            sanitize_generator_q_limits(generator.qb, generator.qt, sanitization_stats);
 
         generator_id.append_value((idx + 1) as i32);
         bus_id.append_value(generator.bus as i32);
@@ -606,8 +753,8 @@ pub fn build_generators_batch(
         aggregation_count.append_null();
         status.append_value(generator.status != 0);
         is_ibr.append_value(ibr);
-        if ibr {
-            ibr_subtype.append_value("generic_ibr");
+        if let Some(value) = subtype {
+            ibr_subtype.append_value(value.as_str());
         } else {
             ibr_subtype.append_null();
         }
@@ -624,14 +771,13 @@ pub fn build_generators_batch(
         ramp_rate_down_mw_min.append_null();
         owner_id.append_null();
         market_resource_id.append_null();
-        controlled_bus_id.append_value(if generator.ireg > 0 {
-            generator.ireg as i32
-        } else {
-            0
-        });
+        controlled_bus_id.append_value(generator_controlled_bus_id(generator));
+        append_pslf_generator_raw_params(&mut params, generator)
+            .context("PSLF generator params")?;
+        let _ = dyd_generators;
         params
-            .append(false)
-            .context("building generators.params null entry")?;
+            .append(true)
+            .context("building generators.params map entry")?;
     }
 
     let params_arr = params.finish();
@@ -782,16 +928,18 @@ pub fn build_branches_batch(
         status.append_value(branch.status != 0);
         owner_id.append_null();
         name_b.append_null();
-        from_nominal_kv.append_value(
-            *bus_nominal_kv
-                .get(&branch.from_bus)
-                .unwrap_or(&0.0),
-        );
-        to_nominal_kv.append_value(
-            *bus_nominal_kv
-                .get(&branch.to_bus)
-                .unwrap_or(&0.0),
-        );
+        from_nominal_kv.append_value(resolve_required_branch_nominal_kv(
+            branch.from_bus,
+            branch.to_bus,
+            bus_nominal_kv,
+            "branches.from_nominal_kv",
+        )?);
+        to_nominal_kv.append_value(resolve_required_branch_nominal_kv(
+            branch.to_bus,
+            branch.from_bus,
+            bus_nominal_kv,
+            "branches.to_nominal_kv",
+        )?);
         device_type.append_null();
         control_mode.append_null();
         control_target_flow_mw.append_null();
@@ -885,16 +1033,20 @@ pub fn build_transformers_2w_batch(
         from_bus_id.append_value(t.from_bus as i32);
         to_bus_id.append_value(t.to_bus as i32);
         ckt.append_value(t.ckt.as_ref());
-        let from_kv = if t.from_kv > 0.0 {
-            t.from_kv
-        } else {
-            *bus_nominal_kv.get(&t.from_bus).unwrap_or(&0.0)
-        };
-        let to_kv = if t.to_kv > 0.0 {
-            t.to_kv
-        } else {
-            *bus_nominal_kv.get(&t.to_bus).unwrap_or(&0.0)
-        };
+        let from_kv = resolve_required_transformer_nominal_kv(
+            t.from_kv,
+            t.from_bus,
+            t.to_bus,
+            bus_nominal_kv,
+            "transformers_2w.from_nominal_kv",
+        )?;
+        let to_kv = resolve_required_transformer_nominal_kv(
+            t.to_kv,
+            t.to_bus,
+            t.from_bus,
+            bus_nominal_kv,
+            "transformers_2w.to_nominal_kv",
+        )?;
         let z_base = transformer_z_base(from_kv, to_kv, base_mva);
         r.append_value(t.r * z_base);
         x.append_value(t.x * z_base);
@@ -955,7 +1107,7 @@ pub fn build_transformers_2w_batch(
 
 pub fn build_transformers_3w_batch(
     transformers: &[Transformer3W],
-    _bus_nominal_kv: &HashMap<u32, f64>,
+    bus_nominal_kv: &HashMap<u32, f64>,
     base_mva: f64,
 ) -> Result<RecordBatch> {
     let schema =
@@ -972,11 +1124,19 @@ pub fn build_transformers_3w_batch(
     let mut x_hl = Float64Builder::new();
     let mut r_ml = Float64Builder::new();
     let mut x_ml = Float64Builder::new();
-    let mut rate_h = Float64Builder::new();
-    let mut rate_m = Float64Builder::new();
-    let mut rate_l = Float64Builder::new();
+    let mut tap_h = Float64Builder::new();
+    let mut tap_m = Float64Builder::new();
+    let mut tap_l = Float64Builder::new();
+    let mut phase_shift = Float64Builder::new();
+    let mut vector_group = StringDictionaryBuilder::<Int32Type>::new();
+    let mut rate_a = Float64Builder::new();
+    let mut rate_b = Float64Builder::new();
+    let mut rate_c = Float64Builder::new();
     let mut status = BooleanBuilder::new();
     let mut name_b = StringDictionaryBuilder::<UInt32Type>::new();
+    let mut nominal_kv_h = Float64Builder::new();
+    let mut nominal_kv_m = Float64Builder::new();
+    let mut nominal_kv_l = Float64Builder::new();
 
     for t in transformers {
         bus_h_id.append_value(t.bus_h as i32);
@@ -990,11 +1150,40 @@ pub fn build_transformers_3w_batch(
         x_hl.append_value(t.x_lh);
         r_ml.append_value(t.r_ml);
         x_ml.append_value(t.x_ml);
-        rate_h.append_value(t.rate_h / base_mva);
-        rate_m.append_value(t.rate_m / base_mva);
-        rate_l.append_value(t.rate_l / base_mva);
+        tap_h.append_value(if t.tap_h > 0.0 { t.tap_h } else { 1.0 });
+        tap_m.append_value(if t.tap_m > 0.0 { t.tap_m } else { 1.0 });
+        tap_l.append_value(if t.tap_l > 0.0 { t.tap_l } else { 1.0 });
+        phase_shift.append_value(t.phase_shift_deg.to_radians());
+        vector_group.append_value("unknown");
+        rate_a.append_value(t.rate_h / base_mva);
+        rate_b.append_value(t.rate_m / base_mva);
+        rate_c.append_value(t.rate_l / base_mva);
         status.append_value(t.status != 0);
         name_b.append_null();
+        let kv_h = resolve_required_transformer_nominal_kv(
+            t.nominal_kv_h,
+            t.bus_h,
+            t.bus_m,
+            bus_nominal_kv,
+            "transformers_3w.nominal_kv_h",
+        )?;
+        let kv_m = resolve_required_transformer_nominal_kv(
+            t.nominal_kv_m,
+            t.bus_m,
+            t.bus_h,
+            bus_nominal_kv,
+            "transformers_3w.nominal_kv_m",
+        )?;
+        let kv_l = resolve_required_transformer_nominal_kv(
+            t.nominal_kv_l,
+            t.bus_l,
+            t.bus_h,
+            bus_nominal_kv,
+            "transformers_3w.nominal_kv_l",
+        )?;
+        nominal_kv_h.append_value(kv_h);
+        nominal_kv_m.append_value(kv_m);
+        nominal_kv_l.append_value(kv_l);
     }
 
     RecordBatch::try_new(
@@ -1011,20 +1200,25 @@ pub fn build_transformers_3w_batch(
             Arc::new(x_hl.finish()),
             Arc::new(r_ml.finish()),
             Arc::new(x_ml.finish()),
-            Arc::new(rate_h.finish()),
-            Arc::new(rate_m.finish()),
-            Arc::new(rate_l.finish()),
+            Arc::new(tap_h.finish()),
+            Arc::new(tap_m.finish()),
+            Arc::new(tap_l.finish()),
+            Arc::new(phase_shift.finish()),
+            Arc::new(vector_group.finish()),
+            Arc::new(rate_a.finish()),
+            Arc::new(rate_b.finish()),
+            Arc::new(rate_c.finish()),
             Arc::new(status.finish()),
             Arc::new(name_b.finish()),
+            Arc::new(nominal_kv_h.finish()),
+            Arc::new(nominal_kv_m.finish()),
+            Arc::new(nominal_kv_l.finish()),
         ],
     )
     .context("building transformers_3w batch")
 }
 
-pub fn build_fixed_shunts_batch(
-    shunts: &[FixedShunt],
-    base_mva: f64,
-) -> Result<RecordBatch> {
+pub fn build_fixed_shunts_batch(shunts: &[FixedShunt], base_mva: f64) -> Result<RecordBatch> {
     let schema =
         Arc::new(table_schema(TABLE_FIXED_SHUNTS).expect("fixed_shunts schema must exist"));
 
@@ -1250,8 +1444,8 @@ pub fn build_owners_batch(owners: &[Owner]) -> Result<RecordBatch> {
         .expect("params field must exist in owners schema")
         .data_type()
         .clone();
-    let params_cast = arrow::compute::cast(&params_arr, &params_target_type)
-        .context("casting owners params")?;
+    let params_cast =
+        arrow::compute::cast(&params_arr, &params_target_type).context("casting owners params")?;
 
     RecordBatch::try_new(
         schema,
@@ -1360,4 +1554,170 @@ pub fn prepare_network_for_export(network: &mut Network) {
 
 pub fn build_bus_aggregates_for_export(network: &Network) -> HashMap<u32, BusAggregate> {
     build_bus_aggregates(network)
+}
+
+const SYNTHETIC_STAR_BUS_MIN_ID_EXCLUSIVE: u32 = 10_000_000;
+
+pub fn validate_export_invariants(
+    table_batches: &HashMap<&'static str, RecordBatch>,
+    transformer_mode: TransformerRepresentationMode,
+) -> Result<()> {
+    let branches = table_batches
+        .get(TABLE_BRANCHES)
+        .ok_or_else(|| anyhow::anyhow!("missing branches batch"))?;
+    validate_nonnegative_finite_column(branches, "rate_a", TABLE_BRANCHES)?;
+    validate_nonnegative_finite_column(branches, "rate_b", TABLE_BRANCHES)?;
+    validate_nonnegative_finite_column(branches, "rate_c", TABLE_BRANCHES)?;
+
+    let transformers = table_batches
+        .get(TABLE_TRANSFORMERS_2W)
+        .ok_or_else(|| anyhow::anyhow!("missing transformers_2w batch"))?;
+    validate_nonnegative_finite_column(transformers, "rate_a", TABLE_TRANSFORMERS_2W)?;
+    validate_nonnegative_finite_column(transformers, "rate_b", TABLE_TRANSFORMERS_2W)?;
+    validate_nonnegative_finite_column(transformers, "rate_c", TABLE_TRANSFORMERS_2W)?;
+
+    let status = transformers
+        .column_by_name("status")
+        .ok_or_else(|| anyhow::anyhow!("transformers_2w.status missing"))?
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .ok_or_else(|| anyhow::anyhow!("transformers_2w.status is not Boolean"))?;
+    let tap_ratio = transformers
+        .column_by_name("tap_ratio")
+        .ok_or_else(|| anyhow::anyhow!("transformers_2w.tap_ratio missing"))?
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .ok_or_else(|| anyhow::anyhow!("transformers_2w.tap_ratio is not Float64"))?;
+    let nominal_tap_ratio = transformers
+        .column_by_name("nominal_tap_ratio")
+        .ok_or_else(|| anyhow::anyhow!("transformers_2w.nominal_tap_ratio missing"))?
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .ok_or_else(|| anyhow::anyhow!("transformers_2w.nominal_tap_ratio is not Float64"))?;
+
+    for i in 0..transformers.num_rows() {
+        if !status.value(i) {
+            continue;
+        }
+        let tap = tap_ratio.value(i);
+        if !tap.is_finite() || tap <= 0.0 {
+            bail!(
+                "export invariant violation: in-service transformers with invalid tap_ratio at 1-based row {}",
+                i + 1
+            );
+        }
+        let nominal = nominal_tap_ratio.value(i);
+        if !nominal.is_finite() || nominal <= 0.0 {
+            bail!(
+                "export invariant violation: in-service transformers with invalid nominal_tap_ratio at 1-based row {}",
+                i + 1
+            );
+        }
+    }
+
+    let transformers_3w = table_batches
+        .get(TABLE_TRANSFORMERS_3W)
+        .ok_or_else(|| anyhow::anyhow!("missing transformers_3w batch"))?;
+    validate_nonnegative_finite_column(transformers_3w, "rate_a", TABLE_TRANSFORMERS_3W)?;
+    validate_nonnegative_finite_column(transformers_3w, "rate_b", TABLE_TRANSFORMERS_3W)?;
+    validate_nonnegative_finite_column(transformers_3w, "rate_c", TABLE_TRANSFORMERS_3W)?;
+
+    validate_transformer_representation_mode(transformers, transformers_3w, transformer_mode)?;
+
+    Ok(())
+}
+
+fn validate_nonnegative_finite_column(
+    batch: &RecordBatch,
+    column_name: &str,
+    table_name: &str,
+) -> Result<()> {
+    let values = batch
+        .column_by_name(column_name)
+        .ok_or_else(|| anyhow::anyhow!("{}.{} missing", table_name, column_name))?
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .ok_or_else(|| anyhow::anyhow!("{}.{} is not Float64", table_name, column_name))?;
+
+    for i in 0..batch.num_rows() {
+        let v = values.value(i);
+        if !v.is_finite() || v < 0.0 {
+            bail!(
+                "export invariant violation: {}.{} has negative or non-finite value at 1-based row {}",
+                table_name,
+                column_name,
+                i + 1
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_transformer_representation_mode(
+    transformers_2w: &RecordBatch,
+    transformers_3w: &RecordBatch,
+    transformer_mode: TransformerRepresentationMode,
+) -> Result<()> {
+    let from_2w = transformers_2w
+        .column_by_name("from_bus_id")
+        .ok_or_else(|| anyhow::anyhow!("transformers_2w.from_bus_id missing"))?
+        .as_any()
+        .downcast_ref::<Int32Array>()
+        .ok_or_else(|| anyhow::anyhow!("transformers_2w.from_bus_id is not Int32"))?;
+    let to_2w = transformers_2w
+        .column_by_name("to_bus_id")
+        .ok_or_else(|| anyhow::anyhow!("transformers_2w.to_bus_id missing"))?
+        .as_any()
+        .downcast_ref::<Int32Array>()
+        .ok_or_else(|| anyhow::anyhow!("transformers_2w.to_bus_id is not Int32"))?;
+    let status_2w = transformers_2w
+        .column_by_name("status")
+        .ok_or_else(|| anyhow::anyhow!("transformers_2w.status missing"))?
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .ok_or_else(|| anyhow::anyhow!("transformers_2w.status is not Boolean"))?;
+
+    let status_3w = transformers_3w
+        .column_by_name("status")
+        .ok_or_else(|| anyhow::anyhow!("transformers_3w.status missing"))?
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .ok_or_else(|| anyhow::anyhow!("transformers_3w.status is not Boolean"))?;
+
+    let mut active_star_buses = 0usize;
+    for row in 0..transformers_2w.num_rows() {
+        if !status_2w.value(row) {
+            continue;
+        }
+        let from = from_2w.value(row);
+        let to = to_2w.value(row);
+        if from > SYNTHETIC_STAR_BUS_MIN_ID_EXCLUSIVE as i32
+            || to > SYNTHETIC_STAR_BUS_MIN_ID_EXCLUSIVE as i32
+        {
+            active_star_buses += 1;
+        }
+    }
+
+    let active_3w_count = (0..transformers_3w.num_rows())
+        .filter(|&row| status_3w.value(row))
+        .count();
+
+    match transformer_mode {
+        TransformerRepresentationMode::Expanded => {
+            if active_3w_count > 0 {
+                bail!(
+                    "export invariant violation: transformer mode 'expanded' requires zero active transformers_3w rows, found {active_3w_count}"
+                );
+            }
+        }
+        TransformerRepresentationMode::Native3W => {
+            if active_star_buses > 0 {
+                bail!(
+                    "export invariant violation: transformer mode 'native_3w' forbids active star-leg transformers_2w rows, found {active_star_buses}"
+                );
+            }
+        }
+    }
+
+    Ok(())
 }

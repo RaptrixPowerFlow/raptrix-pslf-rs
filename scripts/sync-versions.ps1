@@ -1,53 +1,33 @@
-# raptrix-pslf-rs
-# Copyright (c) 2026 Raptrix PowerFlow
-#
-# This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
-# If a copy of the MPL was not distributed with this file, You can obtain one at
-# https://mozilla.org/MPL/2.0/.
-
-<#
-.SYNOPSIS
-    Keeps Cargo.toml version in sync with CHANGELOG.md (and optionally the psse-rs sibling).
-
-.DESCRIPTION
-    This is a minimal faithful copy of the psse-rs version. Expand as needed for full parity.
-
-.PARAMETER Check
-    Only verify; do not modify files. Exit 1 on mismatch.
-#>
-
+# raptrix-pslf-rs — keep Cargo.toml version aligned with CHANGELOG release heading.
 param(
+    [string]$Version,
     [switch]$Check
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$toml = Get-Content Cargo.toml -Raw
-if ($toml -match 'version\s*=\s*"([^"]+)"') {
-    $cargoVersion = $matches[1]
-} else {
-    Write-Error "Could not find version in Cargo.toml"
-    exit 1
+function Get-RootPackageVersion {
+    $cargo = Get-Content -Raw "Cargo.toml"
+    $m = [regex]::Match($cargo, '(?ms)^\[package\].*?^version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"')
+    if (-not $m.Success) { throw "Could not locate [package] version in Cargo.toml" }
+    return $m.Groups[1].Value
 }
 
-$changelog = Get-Content CHANGELOG.md -Raw
-if ($changelog -match '##\s*\[([0-9]+\.[0-9]+\.[0-9]+)\]') {
-    $changelogVersion = $matches[1]
-} else {
-    Write-Warning "No version header found in CHANGELOG.md yet (normal for early scaffold)."
-    $changelogVersion = $null
+if (-not $Version) {
+    $Version = Get-RootPackageVersion
 }
 
-Write-Host "Cargo.toml version : $cargoVersion"
-Write-Host "CHANGELOG top version: $changelogVersion"
-
-if ($Check) {
-    if ($changelogVersion -and ($cargoVersion -ne $changelogVersion)) {
-        Write-Error "Version mismatch: Cargo=$cargoVersion, CHANGELOG=$changelogVersion"
-        exit 1
-    }
-    Write-Host "Version check passed."
+if (-not $Check) {
+    Write-Host "sync-versions.ps1: use -Check in CI. Current Cargo.toml version: $Version"
     exit 0
 }
 
-Write-Host "Sync complete (or no action needed in scaffold phase)."
+$changelog = Get-Content -Raw "CHANGELOG.md"
+$expected = "## [$Version]"
+if ($changelog.IndexOf($expected, [System.StringComparison]::Ordinal) -lt 0) {
+    Write-Error "CHANGELOG.md must contain release heading '$expected' for Cargo.toml version $Version."
+    exit 1
+}
+
+Write-Host "Version consistency OK: Cargo.toml and CHANGELOG both reference $Version"

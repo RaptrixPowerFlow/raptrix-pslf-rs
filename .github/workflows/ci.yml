@@ -1,0 +1,40 @@
+# raptrix-pslf-rs
+# SPDX-License-Identifier: MPL-2.0
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: Version sync check
+        shell: pwsh
+        run: ./scripts/sync-versions.ps1 -Check
+
+      - name: Cargo clippy
+        run: cargo clippy --workspace --all-targets --all-features
+
+      - name: Cargo test
+        run: cargo test --workspace --all-targets

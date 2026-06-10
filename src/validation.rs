@@ -48,9 +48,17 @@ impl ValidationReport {
             eprintln!("[raptrix-pslf-rs] validation: no issues found");
             return;
         }
-        eprintln!("[raptrix-pslf-rs] validation: {} issue(s)", self.issues.len());
+        eprintln!(
+            "[raptrix-pslf-rs] validation: {} issue(s)",
+            self.issues.len()
+        );
         for issue in &self.issues {
-            eprintln!("  {} [{}] {}", issue.severity.label(), issue.code, issue.message);
+            eprintln!(
+                "  {} [{}] {}",
+                issue.severity.label(),
+                issue.code,
+                issue.message
+            );
         }
     }
 }

@@ -51,10 +51,10 @@ pub struct Bus {
     pub number: u32,
     pub name: Box<str>,
     pub kv: f64,
-    pub ty: u8,           // bus type code (1=PQ, 2=PV, 3=Slack, etc.)
+    pub ty: u8, // bus type code (1=PQ, 2=PV, 3=Slack, etc.)
     pub vsched: f64,
-    pub volt: f64,        // pu
-    pub angle: f64,       // degrees
+    pub volt: f64,  // pu
+    pub angle: f64, // degrees
     pub area: u32,
     pub zone: u32,
     pub owner: u32,
@@ -109,7 +109,7 @@ pub struct Generator {
     pub qt: f64,
     pub qb: f64,
     pub vs: f64,
-    pub ireg: u32,        // remote regulation bus (0 = local)
+    pub ireg: u32, // remote regulation bus (0 = local)
     pub mbase: f64,
     pub status: u8,
     pub pt: f64,
@@ -182,6 +182,13 @@ pub struct Transformer3W {
     pub rate_h: f64,
     pub rate_m: f64,
     pub rate_l: f64,
+    pub tap_h: f64,
+    pub tap_m: f64,
+    pub tap_l: f64,
+    pub phase_shift_deg: f64,
+    pub nominal_kv_h: f64,
+    pub nominal_kv_m: f64,
+    pub nominal_kv_l: f64,
     pub star_bus_id: u32, // may be synthetic or explicit in the deck
 }
 
@@ -255,10 +262,15 @@ pub struct Zone {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Default)]
-pub struct DcBus { pub number: u32, pub name: Box<str> }
+pub struct DcBus {
+    pub number: u32,
+    pub name: Box<str>,
+}
 
 #[derive(Debug, Clone, Default)]
-pub struct DcConverter { pub id: Box<str> }
+pub struct DcConverter {
+    pub id: Box<str>,
+}
 
 // ---------------------------------------------------------------------------
 // Dynamics (DYD)
@@ -266,13 +278,13 @@ pub struct DcConverter { pub id: Box<str> }
 
 #[derive(Debug, Clone)]
 pub struct DydModelData {
-    pub model_type: Box<str>,   // "genrou", "repc_a", "esst4b", "ggov1", ...
+    pub model_type: Box<str>, // "genrou", "repc_a", "esst4b", "ggov1", ...
     pub bus: u32,
     pub name: Box<str>,
     pub kv: f64,
     pub id: Box<str>,
-    pub params: Vec<f64>,       // raw numeric parameters after the colon
-    pub raw_line: Box<str>,     // full original line for provenance
+    pub params: Vec<f64>,   // raw numeric parameters after the colon
+    pub raw_line: Box<str>, // full original line for provenance
 }
 
 #[derive(Debug, Clone, Default)]
@@ -289,4 +301,3 @@ impl fmt::Display for DydModelData {
         write!(f, "{} @ bus {} id={}", self.model_type, self.bus, self.id)
     }
 }
-

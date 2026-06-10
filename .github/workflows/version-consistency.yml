@@ -1,0 +1,27 @@
+# raptrix-pslf-rs
+# SPDX-License-Identifier: MPL-2.0
+
+name: Version Consistency
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate version sync
+        shell: pwsh
+        run: ./scripts/sync-versions.ps1 -Check
