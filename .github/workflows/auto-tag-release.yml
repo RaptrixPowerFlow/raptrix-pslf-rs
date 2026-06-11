@@ -1,0 +1,58 @@
+name: Auto Tag Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - Cargo.toml
+      - CHANGELOG.md
+      - "!README.md"
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  create-tag:
+    name: Create release tag from Cargo.toml
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Resolve crate version
+        id: version
+        run: |
+          VERSION=$(grep '^version = ' Cargo.toml | head -n1 | cut -d '"' -f2)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Check remote for existing tag
+        id: check
+        run: |
+          TAG=v${{ steps.version.outputs.version }}
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          if git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create annotated tag and push
+        if: steps.check.outputs.exists == 'false'
+        env:
+          TAG: v${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Tag exists - nothing to do
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          echo "Tag v${{ steps.version.outputs.version }} already exists; skipping."

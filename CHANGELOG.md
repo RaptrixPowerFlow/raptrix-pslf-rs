@@ -22,6 +22,7 @@ _No user-facing changes yet._
 - **`SUPPORTED_RPF_VERSIONS`** in the linked crate accepts **only** **v0.12.1** / **0.12.1** — re-export all cached `.rpf` files.
 - **Dependency**: `raptrix-cim-arrow` **0.5.3** / git **`298f9958cb9a551e273257f045bcadc1c72cf7bb`**.
 - **CI**: GitHub workflows for fmt/clippy/test, version consistency, and public-safety hygiene (mirrors `raptrix-psse-rs`).
+- **Release**: GitHub Release workflow builds Windows, Linux, and macOS (Apple Silicon) binaries when version tag `v0.5.3` is pushed.
 
 ---
 
