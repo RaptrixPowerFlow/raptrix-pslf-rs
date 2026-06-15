@@ -11,7 +11,7 @@
 
 **raptrix-pslf-rs**
 
-This document provides the field-by-field rules for translating GE PSLF EPC (power flow) and DYD (dynamics) records into the Raptrix PowerFlow Interchange (`.rpf` / RPF **v0.12.1**) Apache Arrow schema.
+This document provides the field-by-field rules for translating GE PSLF EPC (power flow) and DYD (dynamics) records into the Raptrix PowerFlow Interchange (`.rpf` / RPF **v0.12.2**) Apache Arrow schema.
 
 **Fidelity policy**: numeric fields are written exactly as they appear in the source EPC file unless an explicit normalisation rule is documented below. No value clamping, substitution, or scaling is applied at parse time except where required to match the RPF schema units (e.g. MVA → per-unit on SBASE). Validation and singularity handling are the responsibility of the downstream solver.
 
@@ -19,8 +19,8 @@ This document provides the field-by-field rules for translating GE PSLF EPC (pow
 
 ## Version compatibility
 
-- **RPF contract**: **v0.12.1** only (`raptrix-cim-arrow` 0.5.3+). Re-emit any cached `.rpf` from older converters.
-- Optional v0.12.1 tables (`remedial_action_schemes`, `contingency_island_analysis`) are not emitted on the standard PSLF export path.
+- **RPF contract**: **v0.12.2** emit (`raptrix-cim-arrow` 0.5.4+); **v0.12.1** files remain readable. Equipment tables include nullable trailing **`mrid`** on new exports.
+- Optional v0.12.2 tables (`remedial_action_schemes`, `contingency_island_analysis`) are not emitted on the standard PSLF export path.
 - Targets GE PSLF EPC files compatible with the provided reference cases (Texas synthetic grids).
 - DYD model records for IBR classification and `dynamics_models` table (GENROU/REPC family and equivalents — aligned with psse-rs DYR handling).
 
@@ -198,4 +198,4 @@ Mirrors the style and depth of `docs/psse-mapping.md` in the PSS/E sibling crate
 | `dynamics_models` | Implemented when `.dyd` supplied |
 | `areas`, `zones`, `owners` | Implemented |
 
-Optional v0.12.1 tables (`remedial_action_schemes`, `contingency_island_analysis`, `scenario_context`) are not emitted on the standard PSLF path.
+Optional v0.12.2 tables (`remedial_action_schemes`, `contingency_island_analysis`, `scenario_context`) are not emitted on the standard PSLF path.

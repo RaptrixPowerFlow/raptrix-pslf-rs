@@ -6,10 +6,11 @@
 // https://mozilla.org/MPL/2.0/.
 
 //! `raptrix-pslf-rs` — High-performance GE PSLF (`.epc` + `.dyd`) →
-//! Raptrix PowerFlow Interchange v0.12.1 converter.
+//! Raptrix PowerFlow Interchange v0.12.2 converter.
 
 pub mod export;
 pub mod models;
+pub mod mrid;
 pub mod parser;
 pub mod validation;
 
@@ -133,6 +134,7 @@ pub fn write_pslf_to_rpf_with_options(
         .map(|b| (b.number, b.kv))
         .collect::<HashMap<_, _>>();
     let agg_by_bus = export::build_bus_aggregates_for_export(&network);
+    let star_leg_mrid_map = mrid::build_star_leg_mrid_map(&network.transformers_3w);
 
     let mut table_batches: HashMap<&'static str, RecordBatch> = HashMap::new();
 
@@ -170,7 +172,12 @@ pub fn write_pslf_to_rpf_with_options(
     );
     table_batches.insert(
         TABLE_TRANSFORMERS_2W,
-        export::build_transformers_2w_batch(&network.transformers, &bus_nominal_kv, sbase)?,
+        export::build_transformers_2w_batch(
+            &network.transformers,
+            &bus_nominal_kv,
+            sbase,
+            &star_leg_mrid_map,
+        )?,
     );
     table_batches.insert(
         TABLE_TRANSFORMERS_3W,

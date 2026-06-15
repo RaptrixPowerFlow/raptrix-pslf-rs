@@ -23,6 +23,10 @@ use crate::models::{
     Area, Branch, Bus, DydGeneratorData, DydModelData, FixedShunt, Generator, Load, Network, Owner,
     SwitchedShunt, SwitchedShuntBankRow, Transformer2W, Transformer3W, Zone,
 };
+use crate::mrid::{
+    self, synth_branch_mrid, synth_generator_mrid, synth_transformer_2w_mrid_with_star_legs,
+    synth_transformer_3w_mrid,
+};
 use crate::{ExportOptions, TransformerRepresentationMode};
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -731,6 +735,7 @@ pub fn build_generators_batch(
     let mut owner_id = Int32Builder::new();
     let mut market_resource_id = StringBuilder::new();
     let mut controlled_bus_id = Int32Builder::new();
+    let mut mrid = StringBuilder::new();
     let mut params = MapBuilder::new(
         Some(map_field_names),
         StringBuilder::new(),
@@ -772,6 +777,7 @@ pub fn build_generators_batch(
         owner_id.append_null();
         market_resource_id.append_null();
         controlled_bus_id.append_value(generator_controlled_bus_id(generator));
+        mrid.append_value(synth_generator_mrid(generator.bus, generator.id.as_ref()));
         append_pslf_generator_raw_params(&mut params, generator)
             .context("PSLF generator params")?;
         let _ = dyd_generators;
@@ -817,6 +823,7 @@ pub fn build_generators_batch(
             Arc::new(market_resource_id.finish()),
             params_cast,
             Arc::new(controlled_bus_id.finish()),
+            Arc::new(mrid.finish()),
         ],
     )
     .context("building generators batch")
@@ -900,6 +907,7 @@ pub fn build_branches_batch(
     let mut injected_voltage_angle_deg = Float64Builder::new();
     let mut parent_line_id = Int32Builder::new();
     let mut section_index = Int32Builder::new();
+    let mut mrid = StringBuilder::new();
     let map_field_names = MapFieldNames {
         entry: "entries".to_string(),
         key: "key".to_string(),
@@ -949,6 +957,11 @@ pub fn build_branches_batch(
         injected_voltage_angle_deg.append_null();
         parent_line_id.append_null();
         section_index.append_null();
+        mrid.append_value(synth_branch_mrid(
+            branch.from_bus,
+            branch.to_bus,
+            branch.ckt.as_ref(),
+        ));
         facts_params
             .append(false)
             .context("building branches.facts_params null entry")?;
@@ -993,6 +1006,7 @@ pub fn build_branches_batch(
             facts_params_cast,
             Arc::new(parent_line_id.finish()),
             Arc::new(section_index.finish()),
+            Arc::new(mrid.finish()),
         ],
     )
     .context("building branches batch")
@@ -1002,6 +1016,7 @@ pub fn build_transformers_2w_batch(
     transformers: &[Transformer2W],
     bus_nominal_kv: &HashMap<u32, f64>,
     base_mva: f64,
+    star_leg_mrid_map: &HashMap<(u32, u32), String>,
 ) -> Result<RecordBatch> {
     let schema =
         Arc::new(table_schema(TABLE_TRANSFORMERS_2W).expect("transformers_2w schema must exist"));
@@ -1028,6 +1043,7 @@ pub fn build_transformers_2w_batch(
     let mut name_b = StringDictionaryBuilder::<UInt32Type>::new();
     let mut from_nominal_kv = Float64Builder::new();
     let mut to_nominal_kv = Float64Builder::new();
+    let mut mrid = StringBuilder::new();
 
     for t in transformers {
         from_bus_id.append_value(t.from_bus as i32);
@@ -1073,6 +1089,12 @@ pub fn build_transformers_2w_batch(
         name_b.append_null();
         from_nominal_kv.append_value(from_kv);
         to_nominal_kv.append_value(to_kv);
+        mrid.append_value(synth_transformer_2w_mrid_with_star_legs(
+            t.from_bus,
+            t.to_bus,
+            t.ckt.as_ref(),
+            star_leg_mrid_map,
+        ));
     }
 
     RecordBatch::try_new(
@@ -1100,6 +1122,7 @@ pub fn build_transformers_2w_batch(
             Arc::new(name_b.finish()),
             Arc::new(from_nominal_kv.finish()),
             Arc::new(to_nominal_kv.finish()),
+            Arc::new(mrid.finish()),
         ],
     )
     .context("building transformers_2w batch")
@@ -1137,6 +1160,7 @@ pub fn build_transformers_3w_batch(
     let mut nominal_kv_h = Float64Builder::new();
     let mut nominal_kv_m = Float64Builder::new();
     let mut nominal_kv_l = Float64Builder::new();
+    let mut mrid = StringBuilder::new();
 
     for t in transformers {
         bus_h_id.append_value(t.bus_h as i32);
@@ -1184,6 +1208,12 @@ pub fn build_transformers_3w_batch(
         nominal_kv_h.append_value(kv_h);
         nominal_kv_m.append_value(kv_m);
         nominal_kv_l.append_value(kv_l);
+        mrid.append_value(synth_transformer_3w_mrid(
+            t.bus_h,
+            t.bus_m,
+            t.bus_l,
+            t.ckt.as_ref(),
+        ));
     }
 
     RecordBatch::try_new(
@@ -1213,6 +1243,7 @@ pub fn build_transformers_3w_batch(
             Arc::new(nominal_kv_h.finish()),
             Arc::new(nominal_kv_m.finish()),
             Arc::new(nominal_kv_l.finish()),
+            Arc::new(mrid.finish()),
         ],
     )
     .context("building transformers_3w batch")
@@ -1556,7 +1587,7 @@ pub fn build_bus_aggregates_for_export(network: &Network) -> HashMap<u32, BusAgg
     build_bus_aggregates(network)
 }
 
-const SYNTHETIC_STAR_BUS_MIN_ID_EXCLUSIVE: u32 = 10_000_000;
+const SYNTHETIC_STAR_BUS_MIN_ID_EXCLUSIVE: u32 = mrid::SYNTHETIC_STAR_BUS_MIN_ID_EXCLUSIVE;
 
 pub fn validate_export_invariants(
     table_batches: &HashMap<&'static str, RecordBatch>,

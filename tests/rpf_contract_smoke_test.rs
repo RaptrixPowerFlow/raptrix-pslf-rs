@@ -5,17 +5,17 @@
 // If a copy of the MPL was not distributed with this file, You can obtain one at
 // https://mozilla.org/MPL/2.0/.
 
-//! Locked RPF interchange contract smoke tests (v0.12.1).
+//! Locked RPF interchange contract smoke tests (v0.12.2).
 
 use std::path::Path;
 
 use anyhow::Result;
-use arrow::array::{BooleanArray, Float64Array, Int8Array};
+use arrow::array::{Array, BooleanArray, Float64Array, Int8Array, StringArray};
 use raptrix_cim_arrow::{
     METADATA_KEY_CASE_MODE, METADATA_KEY_DEFAULT_SHUNT_CONTROL_MODE,
-    METADATA_KEY_LOADS_ZIP_FIDELITY_PRESENCE, METADATA_KEY_RPF_VERSION,
+    METADATA_KEY_LOADS_ZIP_FIDELITY_PRESENCE, METADATA_KEY_MRID_SUPPORT, METADATA_KEY_RPF_VERSION,
     METADATA_KEY_SOLVED_STATE_PRESENCE, METADATA_KEY_TRANSFORMER_REPRESENTATION_MODE, RPF_VERSION,
-    TABLE_BUSES, TABLE_GENERATORS, TABLE_METADATA, rpf_file_metadata,
+    TABLE_BRANCHES, TABLE_BUSES, TABLE_GENERATORS, TABLE_METADATA, rpf_file_metadata, table_schema,
 };
 use raptrix_pslf_rs::{
     ExportOptions, RPF_VERSION as LIB_RPF_VERSION, write_pslf_to_rpf_with_options,
@@ -31,10 +31,18 @@ fn file_exists(p: &str) -> bool {
 #[test]
 fn crate_exports_rpf_version_constant() {
     assert_eq!(LIB_RPF_VERSION, RPF_VERSION);
+    assert_eq!(RPF_VERSION, "v0.12.2");
 }
 
 #[test]
-fn exported_rpf_carries_v0121_contract_metadata() -> Result<()> {
+fn generators_schema_includes_trailing_mrid_column() {
+    let schema = table_schema(TABLE_GENERATORS).expect("generators schema");
+    assert_eq!(schema.fields().len(), 26);
+    assert_eq!(schema.field(25).name(), "mrid");
+}
+
+#[test]
+fn exported_rpf_carries_v0122_contract_metadata() -> Result<()> {
     if !file_exists(EPC_PATH) {
         eprintln!("[skip] proprietary EPC not present");
         return Ok(());
@@ -59,6 +67,10 @@ fn exported_rpf_carries_v0121_contract_metadata() -> Result<()> {
         root_meta.get(METADATA_KEY_RPF_VERSION).map(String::as_str),
         Some(RPF_VERSION),
         "root rpf_version must match locked contract"
+    );
+    assert_eq!(
+        root_meta.get(METADATA_KEY_MRID_SUPPORT).map(String::as_str),
+        Some("v1")
     );
     assert_eq!(
         root_meta.get(METADATA_KEY_CASE_MODE).map(String::as_str),
@@ -115,6 +127,9 @@ fn exported_rpf_carries_v0121_contract_metadata() -> Result<()> {
     );
 
     let gens = tables.get(TABLE_GENERATORS).expect("generators table");
+    assert_eq!(gens.schema().fields().len(), 26);
+    assert_eq!(gens.schema().field(25).name(), "mrid");
+
     let q_min = gens
         .column_by_name("q_min_mvar")
         .expect("q_min_mvar")
@@ -133,6 +148,31 @@ fn exported_rpf_carries_v0121_contract_metadata() -> Result<()> {
             "generator row {i}: q_min must be <= q_max"
         );
     }
+
+    let gen_mrid = gens
+        .column_by_name("mrid")
+        .expect("mrid")
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("Utf8");
+    assert!(
+        (0..gen_mrid.len()).any(|i| gen_mrid.is_valid(i)),
+        "at least one generator row must carry non-null mrid"
+    );
+
+    let branches = tables.get(TABLE_BRANCHES).expect("branches table");
+    assert_eq!(branches.schema().fields().len(), 28);
+    assert_eq!(branches.schema().field(27).name(), "mrid");
+    let branch_mrid = branches
+        .column_by_name("mrid")
+        .expect("mrid")
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("Utf8");
+    assert!(
+        (0..branch_mrid.len()).any(|i| branch_mrid.is_valid(i)),
+        "at least one branch row must carry non-null mrid"
+    );
 
     Ok(())
 }

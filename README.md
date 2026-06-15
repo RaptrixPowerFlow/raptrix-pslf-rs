@@ -62,7 +62,7 @@ Runs basic structural checks on an `.epc` (parse success + required table presen
 
 ## Fidelity & Modern Grid Support
 
-- Emits the full set of **18** canonical required RPF **v0.12.1** root tables (zero-row where appropriate).
+- Emits the full set of **18** canonical required RPF **v0.12.2** root tables (zero-row where appropriate).
 - IBR classification driven from `.dyd` model records (GENROU family + REPC_A / equivalent, matching psse-rs DYR logic where possible).
 - Deterministic `case_fingerprint`, `bus_uuid` generation, and slack selection.
 - Same sanitization and interchange-boundary rules as the PSS/E sibling.
@@ -114,7 +114,7 @@ $env:PYTHONPATH = (Get-Location)
   --output python_tests\regression\out\pslf_psse_parity_report.md
 ```
 
-### Known PSLF vs PSS/E differences (v0.5.3)
+### Known PSLF vs PSS/E differences (v0.5.4)
 
 These are **real format semantics**, not missing parser rows on core tables:
 
@@ -146,7 +146,7 @@ cargo test
 
 ## Versioning & Schema Contract
 
-This crate is pinned to **`raptrix-cim-arrow` 0.5.3** (git rev `298f9958cb9a551e273257f045bcadc1c72cf7bb`), matching the current `raptrix-psse-rs` release. Every emitted `.rpf` is validated against the locked **v0.12.1** contract before returning. Prior contract versions are not accepted by readers in `raptrix-cim-arrow` 0.5.3+ — re-emit cached files through this converter.
+This crate is pinned to **`raptrix-cim-arrow` 0.5.4** (git rev `c45256e`), matching the current `raptrix-psse-rs` release. Every emitted `.rpf` is validated against the locked **v0.12.2** contract before returning and carries synthesized **`mrid`** identifiers on equipment tables. v0.12.1 files remain readable; see [MIGRATION.md](MIGRATION.md).
 
 See [raptrix-cim-rs schema-contract](https://github.com/RaptrixPowerFlow/raptrix-cim-rs/blob/main/docs/schema-contract.md) for the full RPF specification.
 
