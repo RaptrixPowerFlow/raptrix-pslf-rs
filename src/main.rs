@@ -95,11 +95,10 @@ fn main() -> Result<()> {
             let epc_str = epc
                 .to_str()
                 .ok_or_else(|| anyhow::anyhow!("EPC path is not valid UTF-8"))?;
-            if let Some(d) = &dyd {
-                if let Some(ds) = d.to_str() {
+            if let Some(d) = &dyd
+                && let Some(ds) = d.to_str() {
                     eprintln!("[raptrix-pslf-rs] DYD file: {ds}");
                 }
-            }
             let out_str = output
                 .to_str()
                 .ok_or_else(|| anyhow::anyhow!("output path is not valid UTF-8"))?;

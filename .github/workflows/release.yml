@@ -79,7 +79,9 @@ jobs:
           echo "OK: tag ${GITHUB_REF_NAME} matches Cargo.toml version ${CARGO_VER}"
 
       - name: Install Rust toolchain (test gate)
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.96
+        with:
+          components: rustfmt, clippy
 
       - name: Pre-release checkpoint
         shell: pwsh
@@ -97,7 +99,9 @@ jobs:
           fi
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.96
+        with:
+          components: rustfmt, clippy
         with:
           targets: ${{ matrix.target }}
 

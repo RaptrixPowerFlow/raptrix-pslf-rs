@@ -9,13 +9,20 @@
 name = "raptrix-pslf-rs"
 version = "0.5.4"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.96"
 authors = ["Raptrix PowerFlow <dev@raptrix.com>"]
 license = "MPL-2.0"
 description = "High-performance GE PSLF (.epc + .dyd) -> Raptrix PowerFlow Interchange v0.12.2 converter"
 repository = "https://github.com/RaptrixPowerFlow/raptrix-pslf-rs"
 keywords = ["pslf", "ge-pslf", "power-systems", "converter", "raptrix", "cim"]
 categories = ["command-line-utilities", "parser-implementations"]
+
+[lints.rust]
+rust_2024_compatibility = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+
+[lints.clippy]
+all = "warn"
 
 [dependencies]
 anyhow = "1.0"
@@ -24,7 +31,7 @@ chrono = { version = "0.4", default-features = true }
 clap = { version = "4", features = ["derive"] }
 # Use the public raptrix-cim-rs implementation (CIM is canonical).
 # Pin matches the current raptrix-psse-rs rev for full interchange compatibility.
-raptrix-cim-arrow = { git = "https://github.com/RaptrixPowerFlow/raptrix-cim-rs", rev = "c45256e" }
+raptrix-cim-arrow = { git = "https://github.com/RaptrixPowerFlow/raptrix-cim-rs", rev = "4be9ccd" }
 
 [dev-dependencies]
 # Golden-file integration tests depend on the raptrix-cim-arrow reader.
@@ -38,3 +45,4 @@ lto = true
 codegen-units = 1
 debug = false
 incremental = false
+strip = true

@@ -300,14 +300,12 @@ pub fn compute_ibr_subtype_by_generator(network: &Network) -> HashMap<(u32, Stri
             .dyd_generators
             .iter()
             .find(|dg| dg.bus_id == generator.bus && dg.id.as_ref() == generator.id.as_ref())
-        {
-            if dg.is_ibr {
+            && dg.is_ibr {
                 out.insert(
                     key,
                     canonical_ibr_subtype(dg.model_family.as_ref()).to_string(),
                 );
             }
-        }
     }
     out
 }

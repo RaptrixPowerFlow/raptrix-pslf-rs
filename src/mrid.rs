@@ -44,16 +44,14 @@ pub fn synth_transformer_2w_mrid_with_star_legs(
     ckt: &str,
     star_leg_map: &HashMap<(u32, u32), String>,
 ) -> String {
-    if from_bus > SYNTHETIC_STAR_BUS_MIN_ID_EXCLUSIVE {
-        if let Some(mrid) = star_leg_map.get(&(from_bus, to_bus)) {
+    if from_bus > SYNTHETIC_STAR_BUS_MIN_ID_EXCLUSIVE
+        && let Some(mrid) = star_leg_map.get(&(from_bus, to_bus)) {
             return mrid.clone();
         }
-    }
-    if to_bus > SYNTHETIC_STAR_BUS_MIN_ID_EXCLUSIVE {
-        if let Some(mrid) = star_leg_map.get(&(to_bus, from_bus)) {
+    if to_bus > SYNTHETIC_STAR_BUS_MIN_ID_EXCLUSIVE
+        && let Some(mrid) = star_leg_map.get(&(to_bus, from_bus)) {
             return mrid.clone();
         }
-    }
     synth_transformer_2w_mrid(from_bus, to_bus, ckt)
 }
 
