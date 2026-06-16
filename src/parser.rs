@@ -209,9 +209,10 @@ fn parse_solution_parameters(
         if line.to_ascii_lowercase().starts_with("sbase") {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 2
-                && let Ok(v) = parts[1].parse::<f64>() {
-                    net.sbase = v;
-                }
+                && let Ok(v) = parts[1].parse::<f64>()
+            {
+                net.sbase = v;
+            }
         }
         start += 1;
     }
@@ -373,9 +374,10 @@ fn merge_generator_continuation(generator: &mut Generator, line: &str) {
     // still need this applied at export for Newton convergence — see docs/pslf-mapping.md.
     if generator.vs <= 0.0
         && let Some(vs) = tokens.get(4).and_then(|s| s.parse::<f64>().ok())
-            && vs > 0.0 {
-                generator.vs = vs;
-            }
+        && vs > 0.0
+    {
+        generator.vs = vs;
+    }
 }
 
 fn parse_one_generator_line(line: &str) -> Option<Generator> {
@@ -599,10 +601,9 @@ fn apply_transformer_continuation(xfmr: &mut Transformer2W, line_idx: usize, lin
             }
         }
         // PSLF line 2: control flags then WINDV-like tap (e.g. `1 1.000 ...`).
-        2
-            if nums.len() >= 2 && nums[1] > 0.0 && nums[1] <= 5.0 => {
-                xfmr.tap = nums[1];
-            }
+        2 if nums.len() >= 2 && nums[1] > 0.0 && nums[1] <= 5.0 => {
+            xfmr.tap = nums[1];
+        }
         _ => {}
     }
 }
