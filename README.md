@@ -62,7 +62,7 @@ Runs basic structural checks on an `.epc` (parse success + required table presen
 
 ## Fidelity & Modern Grid Support
 
-- Emits the full set of **18** canonical required RPF **v0.12.2** root tables (zero-row where appropriate).
+- Emits the full set of **18** canonical required RPF **v0.12.4** root tables (zero-row where appropriate).
 - IBR classification driven from `.dyd` model records (GENROU family + REPC_A / equivalent, matching psse-rs DYR logic where possible).
 - Deterministic `case_fingerprint`, `bus_uuid` generation, and slack selection.
 - Same sanitization and interchange-boundary rules as the PSS/E sibling.
@@ -114,18 +114,18 @@ $env:PYTHONPATH = (Get-Location)
   --output python_tests\regression\out\pslf_psse_parity_report.md
 ```
 
-### Known PSLF vs PSS/E differences (v0.5.4)
+### Known PSLF vs PSS/E differences (v0.5.6)
 
 These are **real format semantics**, not missing parser rows on core tables:
 
 | Topic | PSLF-native | PSS/E-native | PF impact |
 |-------|-------------|--------------|-----------|
-| **Fixed shunts** | Texas7k EPC has `shunt data [0]`; no explicit table rows | 205 `fixed_shunts` rows | **Resolved for Texas7k** — bus `b_shunt` matches via SVD `b_init_pu`; table row-count still differs |
+| **Fixed shunts** | large benchmark case EPC has `shunt data [0]`; no explicit table rows | 205 `fixed_shunts` rows | **Resolved for large benchmark case** — bus `b_shunt` matches via SVD `b_init_pu`; table row-count still differs |
 | **SVD bank granularity** | One row per step (`switched_shunt_banks`) | Often compressed banks | Low if bus-level SVD counts match |
 | **Bus Q limits** | PV bus `q_min`/`q_max` often 0 in export | Aggregated from online gens | May affect post-solve parity vs PSSE (Q enforcement) |
 | **Dynamics** | DYD model count ≠ DYR count | Different vendor formats | None for steady-state PF |
 
-Core network tables (buses, branches, generators, loads, transformers_2w, areas, zones, owners) match row counts on Texas7k. Spot checks on bus 110001 voltages and gen 111180 MW match between converters.
+Core network tables (buses, branches, generators, loads, transformers_2w, areas, zones, owners) match row counts on large benchmark case. Spot checks on bus 110001 voltages and gen 111180 MW match between converters.
 
 **Windows note:** If `cargo build` fails with Application Control (error 4551) under OneDrive, build via WSL: `wsl -e bash -lc 'cd /mnt/c/.../raptrix-pslf-rs && cargo build --release'`, or set `CARGO_TARGET_DIR=C:\temp\raptrix-pslf-rs-target`.
 
@@ -146,7 +146,7 @@ cargo test
 
 ## Versioning & Schema Contract
 
-This crate is pinned to **`raptrix-cim-arrow` 0.5.4** (git rev `c45256e`), matching the current `raptrix-psse-rs` release. Every emitted `.rpf` is validated against the locked **v0.12.2** contract before returning and carries synthesized **`mrid`** identifiers on equipment tables. v0.12.1 files remain readable; see [MIGRATION.md](MIGRATION.md).
+This crate is pinned to **`raptrix-cim-arrow` 0.5.6** (git rev `v0.5.6`), matching the current `raptrix-psse-rs` release. Every emitted `.rpf` is validated against the locked **v0.12.4** contract before returning and carries synthesized **`mrid`** identifiers on equipment tables. v0.12.1 files remain readable; see [MIGRATION.md](MIGRATION.md).
 
 See [raptrix-cim-rs schema-contract](https://github.com/RaptrixPowerFlow/raptrix-cim-rs/blob/main/docs/schema-contract.md) for the full RPF specification.
 

@@ -11,7 +11,7 @@
 
 **raptrix-pslf-rs**
 
-This document provides the field-by-field rules for translating GE PSLF EPC (power flow) and DYD (dynamics) records into the Raptrix PowerFlow Interchange (`.rpf` / RPF **v0.12.2**) Apache Arrow schema.
+This document provides the field-by-field rules for translating GE PSLF EPC (power flow) and DYD (dynamics) records into the Raptrix PowerFlow Interchange (`.rpf` / RPF **v0.12.4**) Apache Arrow schema.
 
 **Fidelity policy**: numeric fields are written exactly as they appear in the source EPC file unless an explicit normalisation rule is documented below. No value clamping, substitution, or scaling is applied at parse time except where required to match the RPF schema units (e.g. MVA → per-unit on SBASE). Validation and singularity handling are the responsibility of the downstream solver.
 
@@ -19,8 +19,8 @@ This document provides the field-by-field rules for translating GE PSLF EPC (pow
 
 ## Version compatibility
 
-- **RPF contract**: **v0.12.2** emit (`raptrix-cim-arrow` 0.5.4+); **v0.12.1** files remain readable. Equipment tables include nullable trailing **`mrid`** on new exports.
-- Optional v0.12.2 tables (`remedial_action_schemes`, `contingency_island_analysis`) are not emitted on the standard PSLF export path.
+- **RPF contract**: **v0.12.4** emit (`raptrix-cim-arrow` 0.5.6+); **v0.12.1** files remain readable. Equipment tables include nullable trailing **`mrid`** on new exports.
+- Optional v0.12.4 tables (`remedial_action_schemes`, `contingency_island_analysis`) are not emitted on the standard PSLF export path.
 - Targets GE PSLF EPC files compatible with the provided reference cases (Texas synthetic grids).
 - DYD model records for IBR classification and `dynamics_models` table (GENROU/REPC family and equivalents — aligned with psse-rs DYR handling).
 
@@ -43,9 +43,9 @@ GE PSLF often stores fixed shunt admittance **inline on bus records** or in vend
 
 | Case | PSLF EPC | PSSE RAW | RPF export today |
 |------|----------|----------|------------------|
-| Texas7k | `shunt data [0]` | 205 fixed shunts | PSLF: 0 `fixed_shunts` rows; PSSE: 205 rows |
+| large benchmark case | `shunt data [0]` | 205 fixed shunts | PSLF: 0 `fixed_shunts` rows; PSSE: 205 rows |
 
-**PF impact (Texas7k):** PSLF exports 634 `switched_shunts` rows vs PSSE 429 (format representation difference). As of **raptrix-core v0.5.44**, import splits each device into a fixed BINIT residual on `bus.b_shunt` plus controllable bank steps, and `planning_full` mode runs a PSS/E-style SVD outer loop decoupled from the NR mismatch gate. Row-count parity is not required; solver-readiness is validated via the parity harness.
+**PF impact (large benchmark case):** PSLF exports 634 `switched_shunts` rows vs PSSE 429 (format representation difference). As of **raptrix-core v0.5.64**, import splits each device into a fixed BINIT residual on `bus.b_shunt` plus controllable bank steps, and `planning_full` mode runs a PSS/E-style SVD outer loop decoupled from the NR mismatch gate. Row-count parity is not required; solver-readiness is validated via the parity harness.
 
 Future work: map any remaining inline PSLF bus GL/BL into `fixed_shunts` if present on EPC bus continuations.
 
@@ -77,7 +77,7 @@ PSLF `svd data` fields are **per-unit on system base** (same as applied by raptr
 | `vband` | `+12` | `v_low` / `v_high` | Voltage band limits |
 | Step `b` | step list | `b_steps` / banks | Positive steps only; stored in pu |
 
-PSLF expands to granular `switched_shunt_banks` rows (e.g. 2873 steps on Texas7k). PSS/E often compresses banks (1865 rows). Bus-level `switched_shunts` counts match when the physical device set aligns.
+PSLF expands to granular `switched_shunt_banks` rows (e.g. 2873 steps on large benchmark case). PSS/E often compresses banks (1865 rows). Bus-level `switched_shunts` counts match when the physical device set aligns.
 
 **series24 case4/case6 (157 vs 153):** EPC `svd data` contains **157** primary records per case; PSLF export is faithful (157 rows). Matching PSSE RAW exports **153** rows — four fewer devices in the RAW source, not dropped EPC records. **No parser change**; document as acceptable format gap.
 
@@ -125,9 +125,9 @@ EPC `generator data` primary line (after `:`) token indices relative to the colo
 
 Continuation lines (`/` suffix) carry `vs` at token index 4 when absent on the primary row. PSLF commonly stores **VS=1.0** here as a placeholder; this value is parsed but is **not** used for `v_mag_set` export.
 
-**Voltage setpoints (fidelity-first):** generator buses export `v_mag_set = bus.vsched` (EPC bus record colon+2), the regulation setpoint from the EPC bus table. The continuation-line `generator.vs` placeholder (≈1.0) is ignored for `v_mag_set`. For Texas7k, `vsched` correctly reflects ~1.02–1.04 pu targets across 667 generator buses (previously all were mis-set to 1.0).
+**Voltage setpoints (fidelity-first):** generator buses export `v_mag_set = bus.vsched` (EPC bus record colon+2), the regulation setpoint from the EPC bus table. The continuation-line `generator.vs` placeholder (≈1.0) is ignored for `v_mag_set`. For large benchmark case, `vsched` correctly reflects ~1.02–1.04 pu targets across 667 generator buses (previously all were mis-set to 1.0).
 
-**Bus type inference:** EPC bus records store `ty=1` for all connected buses; PV vs PQ is implicit from attached generator records. The export infers type-2 (PV) from `agg.has_generator` so that raptrix-core's Q-switch mechanism engages. Buses with no generators are exported as type-1 (PQ). A type-3 (slack) is NOT explicitly assigned — core auto-selects the largest generator bus (bus 111217 on Texas7k).
+**Bus type inference:** EPC bus records store `ty=1` for all connected buses; PV vs PQ is implicit from attached generator records. The export infers type-2 (PV) from `agg.has_generator` so that raptrix-core's Q-switch mechanism engages. Buses with no generators are exported as type-1 (PQ). A type-3 (slack) is NOT explicitly assigned — core auto-selects the largest generator bus (bus 111217 on large benchmark case).
 
 **Q limits (solver-readiness):**
 
@@ -137,7 +137,7 @@ Continuation lines (`/` suffix) carry `vs` at token index 4 when absent on the p
 
 **Known semantic gap vs PSSE-derived RPF:** PSS/E RAW stores explicit VS per machine; PSLF EPC encodes the target as `bus.vsched`. After the vsched fix both approaches reflect the true regulation target. PSS/E may also export `(0,0)` Q limits for machines with missing RAW fields; PSLF skips those for bus aggregation.
 
-**Texas7k convergence with correct vsched:** **raptrix-core v0.5.44** adds RPF `default_shunt_control_mode` propagation, STAT=0 fixed-only SVD import, and a post-converge planning SVD outer loop. **PSSE-derived Texas7k RPF converges** with planning_full. **PSLF-derived Texas7k RPF still stalls ~30 pu** — the 634-vs-429 SVD device reactive baseline remains a format representation gap requiring further core import aggregation work (not an export bug).
+**large benchmark case convergence with correct vsched:** **raptrix-core v0.5.64** adds RPF `default_shunt_control_mode` propagation, STAT=0 fixed-only SVD import, and a post-converge planning SVD outer loop. **PSSE-derived large benchmark case RPF converges** with planning_full. **PSLF-derived large benchmark case RPF still stalls ~30 pu** — the 634-vs-429 SVD device reactive baseline remains a format representation gap requiring further core import aggregation work (not an export bug).
 
 ---
 
@@ -147,15 +147,15 @@ Do **not** force PSSE/PSLF RPF row-count identity. These gaps are acceptable whe
 
 | Topic | PSLF path | PSSE path | Solver impact |
 |-------|-----------|-----------|---------------|
-| `fixed_shunts` table | 0 rows (Texas7k EPC `shunt data [0]`) | 205 rows (RAW section 2) | b_shunt sourced from SVD b_init on PSLF |
-| Total bus b_shunt (Texas7k) | ~406 pu (634 SVDs × b_init absorbed by core) | ~268 pu (205 fixed shunts) | ~52% excess reactive; root cause of Texas7k divergence |
-| `switched_shunts` count | 634 (Texas7k) | 429 | More SVD devices in PSLF EPC |
-| `switched_shunt_banks` | Granular steps (2873 Texas7k) | Compressed banks (1865) | OK |
+| `fixed_shunts` table | 0 rows (large benchmark case EPC `shunt data [0]`) | 205 rows (RAW section 2) | b_shunt sourced from SVD b_init on PSLF |
+| Total bus b_shunt (large benchmark case) | ~406 pu (634 SVDs × b_init absorbed by core) | ~268 pu (205 fixed shunts) | ~52% excess reactive; root cause of large benchmark case divergence |
+| `switched_shunts` count | 634 (large benchmark case) | 429 | More SVD devices in PSLF EPC |
+| `switched_shunt_banks` | Granular steps (2873 large benchmark case) | Compressed banks (1865) | OK |
 | `transformers_3w` | 0 rows (`native-3w`) | Explicit 3W table | OK (2W-expanded topology) |
 | `dynamics_models` | DYD row count | DYR row count | Dynamics only |
-| Generator `v_mag_set` | `bus.vsched` (~1.02–1.04) — **fixed** | RAW VS / bus VM | Correct fidelity; Texas7k still diverges (SVD b_shunt) |
+| Generator `v_mag_set` | `bus.vsched` (~1.02–1.04) — **fixed** | RAW VS / bus VM | Correct fidelity; large benchmark case still diverges (SVD b_shunt) |
 | Bus `type` | type-2 from `has_generator` — **fixed** | Explicit RAW bus type | Core Q-switch now engages for Texas2k |
-| Texas7k solver-readiness | Not solver-ready (PSLF NR ~30pu stall) | Solver-ready (core v0.5.44) | PSLF format SVD baseline gap |
+| large benchmark case solver-readiness | Not solver-ready (PSLF NR ~30pu stall) | Solver-ready (core v0.5.64) | PSLF format SVD baseline gap |
 | Texas2k_series25 | Solver-ready (0 v-violations, 110 Q-sw) | Solver-ready | parity dv≈0.077 (model semantic gap) |
 | Texas2k_series24 | Converges; 1–14 buses >1.1 pu | Solver-ready | Marginal violations; PSLF/PSSE model differences |
 | ACTIVSg10k/70k | Not converged (expected) | Not converged (expected) | IBR structural; LM+continuation also fails |
@@ -198,4 +198,4 @@ Mirrors the style and depth of `docs/psse-mapping.md` in the PSS/E sibling crate
 | `dynamics_models` | Implemented when `.dyd` supplied |
 | `areas`, `zones`, `owners` | Implemented |
 
-Optional v0.12.2 tables (`remedial_action_schemes`, `contingency_island_analysis`, `scenario_context`) are not emitted on the standard PSLF path.
+Optional v0.12.4 tables (`remedial_action_schemes`, `contingency_island_analysis`, `scenario_context`) are not emitted on the standard PSLF path.

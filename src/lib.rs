@@ -6,7 +6,7 @@
 // https://mozilla.org/MPL/2.0/.
 
 //! `raptrix-pslf-rs` — High-performance GE PSLF (`.epc` + `.dyd`) →
-//! Raptrix PowerFlow Interchange v0.12.2 converter.
+//! Raptrix PowerFlow Interchange v0.12.4 converter.
 
 pub mod export;
 pub mod models;

@@ -36,7 +36,7 @@ fi
 
 for file in "${files[@]}"; do
   case "$file" in
-    INTERNAL-MARKETING-GUIDE.md|INTERNAL-MARKETING-GUIDE-Raptrix-Suite-v*.md|*.raw|*.RAW|*.dyr|*.DYR|*.sav|*.SAV|*.epc|*.EPC|*.dyd|*.DYD|*.pss|*.PSS|*.pdf)
+    INTERNAL-MARKETING-GUIDE.md|INTERNAL-MARKETING-GUIDE-Raptrix-Suite-v*.md|*.raw|*.RAW|*.dyr|*.DYR|*.sav|*.SAV|*.epc|*.EPC|*.dyd|*.DYD|*.pss|*.PSS|*.pdf|*.rpf|*.RPF)
       echo "[public-safety] blocked filename: $file"
       bad=1
       ;;

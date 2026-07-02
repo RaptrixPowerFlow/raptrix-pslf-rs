@@ -535,9 +535,7 @@ pub fn build_metadata_batch(
         .clone();
     let computational_load_mode_col = new_null_array(&computational_load_mode_type, 1);
 
-    RecordBatch::try_new(
-        schema,
-        vec![
+    let mut columns: Vec<arrow::array::ArrayRef> = vec![
             Arc::new(base_mva),
             Arc::new(frequency_hz),
             Arc::new(psse_version),
@@ -579,9 +577,18 @@ pub fn build_metadata_batch(
             Arc::new(real_time_discovery.finish()),
             Arc::new(default_shunt_control_mode.finish()),
             computational_load_mode_col,
-        ],
-    )
-    .context("building metadata batch")
+    ];
+
+    for field in schema.fields().iter().skip(columns.len()) {
+        debug_assert!(
+            field.is_nullable(),
+            "unbuilt metadata column '{}' must be nullable",
+            field.name()
+        );
+        columns.push(new_null_array(field.data_type(), 1));
+    }
+
+    RecordBatch::try_new(schema, columns).context("building metadata batch")
 }
 
 pub fn build_buses_batch(

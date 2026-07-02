@@ -13,13 +13,23 @@ _No user-facing changes yet._
 
 ---
 
+## [0.5.6] - 2026-07-02
+
+### RPF **v0.12.4** (`raptrix-cim-arrow` **0.5.6**)
+
+- **Emit RPF v0.12.4**: version stamp and reader pin only on the planning export path; nullable v0.12.3/v0.12.4 metadata columns remain null and optional solved-state tables zero-row.
+- **No re-export required** for existing **v0.12.1+** `.rpf` files.
+- **Dependency**: `raptrix-cim-arrow` **0.5.6** / git tag **`v0.5.6`**.
+
+---
+
 ## [0.5.4] - 2026-06-15
 
 ### RPF **v0.12.2** (`raptrix-cim-arrow` **0.5.4**)
 
 - **Emit v0.12.2**: every `.rpf` from this crate carries `raptrix.version` / contract **v0.12.2** (via `raptrix-cim-arrow::SCHEMA_VERSION`) and file metadata **`rpf.mrid_support = v1`**.
 - **Additive nullable `mrid` column** on `branches`, `generators`, `transformers_2w`, and `transformers_3w`. PSLF exports populate deterministic vendor-path identifiers (`BR_`, `GEN_`, `XF2_`, `XF3_`, star-leg `{parent}_H/_M/_L` suffixes) on all new writes.
-- **No re-export required** for existing v0.12.1 files — readers pad missing trailing columns as null. Downstream tools (Sentinel v2.4, Studio, etc.) should prefer `mrid` for equipment_id mapping.
+- **No re-export required** for existing v0.12.1 files — readers pad missing trailing columns as null. Downstream tools should prefer `mrid` for equipment_id mapping.
 - **Dependency**: `raptrix-cim-arrow` **0.5.4** / git **`c45256e`**.
 
 ---
