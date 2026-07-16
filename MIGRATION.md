@@ -1,5 +1,20 @@
 # Migration — raptrix-pslf-rs
 
+## v0.5.7 / RPF v0.12.5 (additive — no migration required)
+
+`raptrix-pslf-rs` **0.5.7** emits RPF **v0.12.5** (root metadata `raptrix.version` matches `raptrix-cim-arrow::SCHEMA_VERSION`).
+
+### What changed
+
+- **Nullable trailing `buses.latitude` / `buses.longitude`** (`Float64`, WGS84 degrees). PSLF EPC has no standard GIS fields — columns are always **null** on this converter path.
+- **Reader compatibility**: pinned `raptrix-cim-arrow` 0.5.7 accepts **v0.12.1 through v0.12.5**.
+
+### Compatibility
+
+- **No re-export required** for existing **v0.12.1+** `.rpf` files.
+
+---
+
 ## v0.5.6 / RPF v0.12.4 (additive — no migration required)
 
 `raptrix-pslf-rs` **0.5.6** emits RPF **v0.12.4** (root metadata `raptrix.version` matches `raptrix-cim-arrow::SCHEMA_VERSION`).

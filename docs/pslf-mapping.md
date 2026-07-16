@@ -11,7 +11,7 @@
 
 **raptrix-pslf-rs**
 
-This document provides the field-by-field rules for translating GE PSLF EPC (power flow) and DYD (dynamics) records into the Raptrix PowerFlow Interchange (`.rpf` / RPF **v0.12.4**) Apache Arrow schema.
+This document provides the field-by-field rules for translating GE PSLF EPC (power flow) and DYD (dynamics) records into the Raptrix PowerFlow Interchange (`.rpf` / RPF **v0.12.5**) Apache Arrow schema.
 
 **Fidelity policy**: numeric fields are written exactly as they appear in the source EPC file unless an explicit normalisation rule is documented below. No value clamping, substitution, or scaling is applied at parse time except where required to match the RPF schema units (e.g. MVA → per-unit on SBASE). Validation and singularity handling are the responsibility of the downstream solver.
 
@@ -19,8 +19,8 @@ This document provides the field-by-field rules for translating GE PSLF EPC (pow
 
 ## Version compatibility
 
-- **RPF contract**: **v0.12.4** emit (`raptrix-cim-arrow` 0.5.6+); **v0.12.1** files remain readable. Equipment tables include nullable trailing **`mrid`** on new exports.
-- Optional v0.12.4 tables (`remedial_action_schemes`, `contingency_island_analysis`) are not emitted on the standard PSLF export path.
+- **RPF contract**: **v0.12.5** emit (`raptrix-cim-arrow` 0.5.7+); **v0.12.1+** files remain readable. Equipment tables include nullable trailing **`mrid`** on new exports; `buses.latitude` / `buses.longitude` are null (no WGS84 in EPC).
+- Optional v0.12.x tables (`remedial_action_schemes`, `contingency_island_analysis`) are not emitted on the standard PSLF export path.
 - Targets GE PSLF EPC files compatible with the provided reference cases (Texas synthetic grids).
 - DYD model records for IBR classification and `dynamics_models` table (GENROU/REPC family and equivalents — aligned with psse-rs DYR handling).
 

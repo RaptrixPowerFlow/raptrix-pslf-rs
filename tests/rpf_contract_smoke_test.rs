@@ -5,7 +5,7 @@
 // If a copy of the MPL was not distributed with this file, You can obtain one at
 // https://mozilla.org/MPL/2.0/.
 
-//! Locked RPF interchange contract smoke tests (v0.12.4).
+//! Locked RPF interchange contract smoke tests (v0.12.5).
 
 use std::path::Path;
 
@@ -31,7 +31,7 @@ fn file_exists(p: &str) -> bool {
 #[test]
 fn crate_exports_rpf_version_constant() {
     assert_eq!(LIB_RPF_VERSION, RPF_VERSION);
-    assert_eq!(RPF_VERSION, "v0.12.4");
+    assert_eq!(RPF_VERSION, "v0.12.5");
 }
 
 #[test]

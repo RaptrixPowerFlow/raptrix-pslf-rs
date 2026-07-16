@@ -62,7 +62,7 @@ Runs basic structural checks on an `.epc` (parse success + required table presen
 
 ## Fidelity & Modern Grid Support
 
-- Emits the full set of **18** canonical required RPF **v0.12.4** root tables (zero-row where appropriate).
+- Emits the full set of **18** canonical required RPF **v0.12.5** root tables (zero-row where appropriate). Nullable `buses.latitude` / `buses.longitude` are always null (no WGS84 in EPC).
 - IBR classification driven from `.dyd` model records (GENROU family + REPC_A / equivalent, matching psse-rs DYR logic where possible).
 - Deterministic `case_fingerprint`, `bus_uuid` generation, and slack selection.
 - Same sanitization and interchange-boundary rules as the PSS/E sibling.
@@ -146,7 +146,7 @@ cargo test
 
 ## Versioning & Schema Contract
 
-This crate is pinned to **`raptrix-cim-arrow` 0.5.6** (git rev `v0.5.6`), matching the current `raptrix-psse-rs` release. Every emitted `.rpf` is validated against the locked **v0.12.4** contract before returning and carries synthesized **`mrid`** identifiers on equipment tables. v0.12.1 files remain readable; see [MIGRATION.md](MIGRATION.md).
+This crate is pinned to **`raptrix-cim-arrow` 0.5.7** (git tag `v0.5.7`), matching the current `raptrix-psse-rs` release. Every emitted `.rpf` is validated against the locked **v0.12.5** contract before returning and carries synthesized **`mrid`** identifiers on equipment tables. v0.12.1+ files remain readable; see [MIGRATION.md](MIGRATION.md).
 
 See [raptrix-cim-rs schema-contract](https://github.com/RaptrixPowerFlow/raptrix-cim-rs/blob/main/docs/schema-contract.md) for the full RPF specification.
 

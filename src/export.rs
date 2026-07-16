@@ -536,47 +536,47 @@ pub fn build_metadata_batch(
     let computational_load_mode_col = new_null_array(&computational_load_mode_type, 1);
 
     let mut columns: Vec<arrow::array::ArrayRef> = vec![
-            Arc::new(base_mva),
-            Arc::new(frequency_hz),
-            Arc::new(psse_version),
-            Arc::new(study_name.finish()),
-            Arc::new(timestamp_utc.finish()),
-            Arc::new(raptrix_version.finish()),
-            Arc::new(is_planning_case),
-            Arc::new(source_case_id.finish()),
-            Arc::new(snapshot_timestamp_utc.finish()),
-            Arc::new(case_fingerprint.finish()),
-            Arc::new(validation_mode.finish()),
-            custom_metadata,
-            Arc::new(case_mode_arr.finish()),
-            Arc::new(solved_state_presence_arr.finish()),
-            Arc::new(solver_version_arr.finish()),
-            Arc::new(solver_iterations_arr.finish()),
-            Arc::new(solver_accuracy_arr.finish()),
-            Arc::new(solver_mode_arr.finish()),
-            Arc::new(slack_bus_id_solved_arr.finish()),
-            Arc::new(angle_reference_deg_arr.finish()),
-            Arc::new(solved_shunt_state_presence_arr.finish()),
-            Arc::new(arrow::array::BooleanArray::from(vec![
-                modern_grid_profile_value,
-            ])),
-            Arc::new(ibr_penetration_pct_arr.finish()),
-            Arc::new(arrow::array::BooleanArray::from(vec![has_ibr_value])),
-            Arc::new(arrow::array::BooleanArray::from(vec![
-                has_smart_valve_value,
-            ])),
-            Arc::new(arrow::array::BooleanArray::from(vec![
-                has_multi_terminal_dc_value,
-            ])),
-            Arc::new(study_purpose_arr.finish()),
-            Arc::new(scenario_tags_arr.finish()),
-            Arc::new(hour_ahead_uncertainty_band.finish()),
-            Arc::new(commitment_source.finish()),
-            Arc::new(solver_q_limit_infeasible_count.finish()),
-            Arc::new(pv_to_pq_switch_count.finish()),
-            Arc::new(real_time_discovery.finish()),
-            Arc::new(default_shunt_control_mode.finish()),
-            computational_load_mode_col,
+        Arc::new(base_mva),
+        Arc::new(frequency_hz),
+        Arc::new(psse_version),
+        Arc::new(study_name.finish()),
+        Arc::new(timestamp_utc.finish()),
+        Arc::new(raptrix_version.finish()),
+        Arc::new(is_planning_case),
+        Arc::new(source_case_id.finish()),
+        Arc::new(snapshot_timestamp_utc.finish()),
+        Arc::new(case_fingerprint.finish()),
+        Arc::new(validation_mode.finish()),
+        custom_metadata,
+        Arc::new(case_mode_arr.finish()),
+        Arc::new(solved_state_presence_arr.finish()),
+        Arc::new(solver_version_arr.finish()),
+        Arc::new(solver_iterations_arr.finish()),
+        Arc::new(solver_accuracy_arr.finish()),
+        Arc::new(solver_mode_arr.finish()),
+        Arc::new(slack_bus_id_solved_arr.finish()),
+        Arc::new(angle_reference_deg_arr.finish()),
+        Arc::new(solved_shunt_state_presence_arr.finish()),
+        Arc::new(arrow::array::BooleanArray::from(vec![
+            modern_grid_profile_value,
+        ])),
+        Arc::new(ibr_penetration_pct_arr.finish()),
+        Arc::new(arrow::array::BooleanArray::from(vec![has_ibr_value])),
+        Arc::new(arrow::array::BooleanArray::from(vec![
+            has_smart_valve_value,
+        ])),
+        Arc::new(arrow::array::BooleanArray::from(vec![
+            has_multi_terminal_dc_value,
+        ])),
+        Arc::new(study_purpose_arr.finish()),
+        Arc::new(scenario_tags_arr.finish()),
+        Arc::new(hour_ahead_uncertainty_band.finish()),
+        Arc::new(commitment_source.finish()),
+        Arc::new(solver_q_limit_infeasible_count.finish()),
+        Arc::new(pv_to_pq_switch_count.finish()),
+        Arc::new(real_time_discovery.finish()),
+        Arc::new(default_shunt_control_mode.finish()),
+        computational_load_mode_col,
     ];
 
     for field in schema.fields().iter().skip(columns.len()) {
@@ -619,6 +619,9 @@ pub fn build_buses_batch(
     let mut bus_uuid = StringDictionaryBuilder::<Int32Type>::new();
     let mut qd_load_pu = Float64Builder::new();
     let mut qg_sched_pu = Float64Builder::new();
+    // v0.12.5: optional WGS84 GIS (PSLF EPC has no standard lat/lon → null).
+    let mut latitude = Float64Builder::new();
+    let mut longitude = Float64Builder::new();
 
     for bus in buses {
         let agg = agg_by_bus.get(&bus.number).cloned().unwrap_or_default();
@@ -671,6 +674,8 @@ pub fn build_buses_batch(
         bus_uuid.append_value(format!("pslf:bus:{}", bus.number));
         qd_load_pu.append_value(agg.qd_load_pu);
         qg_sched_pu.append_value(agg.qg_sched_pu);
+        latitude.append_null();
+        longitude.append_null();
     }
 
     RecordBatch::try_new(
@@ -698,6 +703,8 @@ pub fn build_buses_batch(
             Arc::new(bus_uuid.finish()),
             Arc::new(qd_load_pu.finish()),
             Arc::new(qg_sched_pu.finish()),
+            Arc::new(latitude.finish()),
+            Arc::new(longitude.finish()),
         ],
     )
     .context("building buses batch")
