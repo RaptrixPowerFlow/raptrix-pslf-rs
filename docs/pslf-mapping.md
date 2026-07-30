@@ -11,7 +11,7 @@
 
 **raptrix-pslf-rs**
 
-This document provides the field-by-field rules for translating GE PSLF EPC (power flow) and DYD (dynamics) records into the Raptrix PowerFlow Interchange (`.rpf` / RPF **v0.12.5**) Apache Arrow schema.
+This document provides the field-by-field rules for translating GE PSLF EPC (power flow) and DYD (dynamics) records into the Raptrix PowerFlow Interchange (`.rpf` / RPF **v0.13.0**) Apache Arrow schema.
 
 **Fidelity policy**: numeric fields are written exactly as they appear in the source EPC file unless an explicit normalisation rule is documented below. No value clamping, substitution, or scaling is applied at parse time except where required to match the RPF schema units (e.g. MVA → per-unit on SBASE). Validation and singularity handling are the responsibility of the downstream solver.
 
@@ -19,10 +19,11 @@ This document provides the field-by-field rules for translating GE PSLF EPC (pow
 
 ## Version compatibility
 
-- **RPF contract**: **v0.12.5** emit (`raptrix-cim-arrow` 0.5.7+); **v0.12.1+** files remain readable. Equipment tables include nullable trailing **`mrid`** on new exports; `buses.latitude` / `buses.longitude` are null (no WGS84 in EPC).
-- Optional v0.12.x tables (`remedial_action_schemes`, `contingency_island_analysis`) are not emitted on the standard PSLF export path.
+- **RPF contract**: **v0.13.0** emit only (`raptrix-cim-arrow` 0.6.0). Pre-0.13 `.rpf` files must be re-exported (clean cut; no dual-read).
+- Equipment tables include nullable trailing **`mrid`** on new exports; `buses.latitude` / `buses.longitude` are null (no WGS84 in EPC).
+- Optional tables (`remedial_action_schemes`, `contingency_island_analysis`, `scenario_context`, computational load profiles) are not emitted on the standard PSLF export path.
 - Targets GE PSLF EPC files compatible with the provided reference cases (Texas synthetic grids).
-- DYD model records for IBR classification and `dynamics_models` table (GENROU/REPC family and equivalents — aligned with psse-rs DYR handling).
+- DYD model records for IBR classification and `dynamics_models` table (GENROU/REPC family and equivalents — aligned with psse-rs DYR handling). `classical_params` is present and null (DYD numerics are positional).
 
 ## 3-Winding Transformers
 
@@ -32,6 +33,8 @@ Tertiary winding data appears in the `transformer data` section (columns `ts_r`,
 
 ## Export metadata (aligned with psse-rs)
 
+- **`source_format`**: `pslf_epc`; **`source_identity_scheme`**: `dense_bus_id`; **`source_format_version`**: null.
+- **`rpf.identity.model`**: `hybrid_solver_flat_v1`.
 - **`case_mode`**: Auto-detected from EPC bus `volt` / `angle` — `flat_start_planning` when all buses are at 1.0 pu / 0°, otherwise `warm_start_planning`. Override with `--case-mode`.
 - **`default_shunt_control_mode`**: Set to `planning_full` for planning case modes (same rule as psse-rs). Override with `--default-shunt-control-mode`.
 
@@ -127,7 +130,9 @@ Continuation lines (`/` suffix) carry `vs` at token index 4 when absent on the p
 
 **Voltage setpoints (fidelity-first):** generator buses export `v_mag_set = bus.vsched` (EPC bus record colon+2), the regulation setpoint from the EPC bus table. The continuation-line `generator.vs` placeholder (≈1.0) is ignored for `v_mag_set`. For large benchmark case, `vsched` correctly reflects ~1.02–1.04 pu targets across 667 generator buses (previously all were mis-set to 1.0).
 
-**Bus type inference:** EPC bus records store `ty=1` for all connected buses; PV vs PQ is implicit from attached generator records. The export infers type-2 (PV) from `agg.has_generator` so that raptrix-core's Q-switch mechanism engages. Buses with no generators are exported as type-1 (PQ). A type-3 (slack) is NOT explicitly assigned — core auto-selects the largest generator bus (bus 111217 on large benchmark case).
+**Bus type inference:** EPC bus records store `ty=1` for all connected buses; PV vs PQ is implicit from attached generator records. The export infers dictionary token `PV` from `agg.has_generator` so that raptrix-core's Q-switch mechanism engages. Buses with no generators are exported as `PQ`. `Slack` is NOT explicitly assigned — core auto-selects the largest generator bus (bus 111217 on large benchmark case).
+
+**Remote regulation:** `generators.controlled_bus_id` is null for local regulation (`ireg == 0` or `ireg == bus`); otherwise the remote dense bus id.
 
 **Q limits (solver-readiness):**
 
@@ -154,7 +159,7 @@ Do **not** force PSSE/PSLF RPF row-count identity. These gaps are acceptable whe
 | `transformers_3w` | 0 rows (`native-3w`) | Explicit 3W table | OK (2W-expanded topology) |
 | `dynamics_models` | DYD row count | DYR row count | Dynamics only |
 | Generator `v_mag_set` | `bus.vsched` (~1.02–1.04) — **fixed** | RAW VS / bus VM | Correct fidelity; large benchmark case still diverges (SVD b_shunt) |
-| Bus `type` | type-2 from `has_generator` — **fixed** | Explicit RAW bus type | Core Q-switch now engages for Texas2k |
+| Bus `type` | `PV` from `has_generator` — **fixed** | Explicit RAW bus type tokens | Core Q-switch now engages for Texas2k |
 | large benchmark case solver-readiness | Not solver-ready (PSLF NR ~30pu stall) | Solver-ready (core v0.5.64) | PSLF format SVD baseline gap |
 | Texas2k_series25 | Solver-ready (0 v-violations, 110 Q-sw) | Solver-ready | parity dv≈0.077 (model semantic gap) |
 | Texas2k_series24 | Converges; 1–14 buses >1.1 pu | Solver-ready | Marginal violations; PSLF/PSSE model differences |
@@ -187,15 +192,15 @@ Mirrors the style and depth of `docs/psse-mapping.md` in the PSS/E sibling crate
 
 | Table | Status |
 |-------|--------|
-| `metadata` | Implemented — case_mode, modern-grid flags, study/scenario metadata |
-| `buses` | Implemented — vsched PV setpoints, Q aggregation, bus_uuid |
-| `generators` | Implemented — IBR subtype from DYD, params map, Q sanitization |
-| `loads` | Implemented — constant-PQ; ZIP columns null (`zip_fidelity_presence=not_available`) |
+| `metadata` | Implemented — v0.13.0 provenance, case_mode, modern-grid flags, study/scenario metadata |
+| `buses` | Implemented — dictionary type tokens, vsched PV setpoints, Q aggregation, bus_uuid |
+| `generators` | Implemented — nullable controlled_bus_id, IBR subtype from DYD, params map, Q sanitization |
+| `loads` | Implemented — constant-PQ; ZIP columns null; trailing `mrid` null |
 | `branches` | Implemented — physical R/X/B scaling, FACTS columns null |
 | `transformers_2w` / `transformers_3w` | Implemented — native-3w mode (3W table often zero-row) |
-| `switched_shunts` + `switched_shunt_banks` | Implemented — granular PSLF SVD steps |
-| `fixed_shunts` | Implemented — zero-row when EPC has no explicit shunt table |
-| `dynamics_models` | Implemented when `.dyd` supplied |
+| `switched_shunts` + `switched_shunt_banks` | Implemented — granular PSLF SVD steps; trailing `mrid` null |
+| `fixed_shunts` | Implemented — zero-row when EPC has no explicit shunt table; trailing `mrid` null |
+| `dynamics_models` | Implemented when `.dyd` supplied; `classical_params` null |
 | `areas`, `zones`, `owners` | Implemented |
 
-Optional v0.12.4 tables (`remedial_action_schemes`, `contingency_island_analysis`, `scenario_context`) are not emitted on the standard PSLF path.
+Optional tables (`remedial_action_schemes`, `contingency_island_analysis`, `scenario_context`, computational load profiles) are not emitted on the standard PSLF path.

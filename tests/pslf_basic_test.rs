@@ -15,10 +15,11 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::Result;
-use arrow::array::{Float64Array, Int8Array, Int32Array};
+use arrow::array::{Array, DictionaryArray, Float64Array, Int32Array, StringArray};
+use arrow::datatypes::Int32Type;
 use raptrix_cim_arrow::{
-    RPF_VERSION, TABLE_BUSES, TABLE_GENERATORS, TABLE_LOADS, read_rpf_tables, rpf_file_metadata,
-    summarize_rpf,
+    BUS_TYPE_PV, RPF_VERSION, TABLE_BUSES, TABLE_GENERATORS, TABLE_LOADS, read_rpf_tables,
+    rpf_file_metadata, summarize_rpf,
 };
 
 const EPC_PATH: &str = "tests/networks/Texas7k_20210804.EPC";
@@ -122,12 +123,7 @@ fn pslf_parser_and_writer_smoke() -> Result<()> {
         .as_any()
         .downcast_ref::<Float64Array>()
         .expect("v_mag_set Float64");
-    let bus_type_col = buses
-        .column_by_name("type")
-        .expect("type column in buses")
-        .as_any()
-        .downcast_ref::<Int8Array>()
-        .expect("type Int8");
+    let bus_type_col = buses.column_by_name("type").expect("type column in buses");
     let q_min_col = buses
         .column_by_name("q_min")
         .expect("q_min column")
@@ -162,10 +158,19 @@ fn pslf_parser_and_writer_smoke() -> Result<()> {
         "bus 111180 vsched from EPC: expected ~1.038548, got {}",
         bus_111180.vsched
     );
+    let bus_type_dict = bus_type_col
+        .as_any()
+        .downcast_ref::<DictionaryArray<Int32Type>>()
+        .expect("type Dictionary<Int32, Utf8>");
+    let bus_type_values = bus_type_dict
+        .values()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("dictionary values Utf8");
+    let bus_type_token = bus_type_values.value(bus_type_dict.key(bus_idx).expect("dictionary key"));
     assert_eq!(
-        bus_type_col.value(bus_idx),
-        2i8,
-        "gen bus 111180 must be exported as type-2 (PV)"
+        bus_type_token, BUS_TYPE_PV,
+        "gen bus 111180 must be exported as PV"
     );
     // sbase from EPC header — Texas7k uses 100
     let base_mva = net.sbase;

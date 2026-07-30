@@ -6,7 +6,7 @@
 // https://mozilla.org/MPL/2.0/.
 
 //! `raptrix-pslf-rs` — High-performance GE PSLF (`.epc` + `.dyd`) →
-//! Raptrix PowerFlow Interchange v0.12.5 converter.
+//! Raptrix PowerFlow Interchange v0.13.0 converter.
 
 pub mod export;
 pub mod models;
@@ -19,7 +19,8 @@ use std::collections::HashMap;
 use anyhow::{Context, Result, bail};
 use arrow::record_batch::RecordBatch;
 use raptrix_cim_arrow::{
-    METADATA_KEY_CASE_FINGERPRINT, METADATA_KEY_CASE_MODE, METADATA_KEY_DEFAULT_SHUNT_CONTROL_MODE,
+    IDENTITY_MODEL_HYBRID_SOLVER_FLAT_V1, METADATA_KEY_CASE_FINGERPRINT, METADATA_KEY_CASE_MODE,
+    METADATA_KEY_DEFAULT_SHUNT_CONTROL_MODE, METADATA_KEY_IDENTITY_MODEL,
     METADATA_KEY_SOLVED_STATE_PRESENCE, METADATA_KEY_VALIDATION_MODE, RootWriteOptions,
     TABLE_AREAS, TABLE_BRANCHES, TABLE_BUSES, TABLE_CONTINGENCIES, TABLE_DC_LINES_2W,
     TABLE_DYNAMICS_MODELS, TABLE_FIXED_SHUNTS, TABLE_GENERATORS, TABLE_INTERFACES, TABLE_LOADS,
@@ -229,6 +230,10 @@ pub fn write_pslf_to_rpf_with_options(
     };
 
     let mut additional_root_metadata = HashMap::new();
+    additional_root_metadata.insert(
+        METADATA_KEY_IDENTITY_MODEL.to_string(),
+        IDENTITY_MODEL_HYBRID_SOLVER_FLAT_V1.to_string(),
+    );
     additional_root_metadata.insert(
         METADATA_KEY_CASE_FINGERPRINT.to_string(),
         case_fingerprint.clone(),

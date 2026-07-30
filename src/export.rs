@@ -5,18 +5,18 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use arrow::array::{
-    BooleanArray, BooleanBuilder, Float64Array, Float64Builder, Int8Builder, Int32Array,
-    Int32Builder, ListBuilder, MapBuilder, MapFieldNames, StringBuilder, StringDictionaryBuilder,
-    new_null_array,
+    BooleanArray, BooleanBuilder, Float64Array, Float64Builder, Int32Array, Int32Builder,
+    ListBuilder, MapBuilder, MapFieldNames, StringBuilder, StringDictionaryBuilder,
+    TimestampMicrosecondBuilder, new_null_array,
 };
 use arrow::datatypes::{Int32Type, UInt32Type};
 use arrow::record_batch::RecordBatch;
 use chrono::{SecondsFormat, Utc};
 use raptrix_cim_arrow::{
-    METADATA_KEY_COMPUTATIONAL_LOAD_MODE, TABLE_AREAS, TABLE_BRANCHES, TABLE_BUSES,
-    TABLE_DYNAMICS_MODELS, TABLE_FIXED_SHUNTS, TABLE_GENERATORS, TABLE_LOADS, TABLE_METADATA,
-    TABLE_OWNERS, TABLE_SWITCHED_SHUNT_BANKS, TABLE_SWITCHED_SHUNTS, TABLE_TRANSFORMERS_2W,
-    TABLE_TRANSFORMERS_3W, TABLE_ZONES, table_schema,
+    BUS_TYPE_PQ, BUS_TYPE_PV, BUS_TYPE_SLACK, METADATA_KEY_COMPUTATIONAL_LOAD_MODE, TABLE_AREAS,
+    TABLE_BRANCHES, TABLE_BUSES, TABLE_DYNAMICS_MODELS, TABLE_FIXED_SHUNTS, TABLE_GENERATORS,
+    TABLE_LOADS, TABLE_METADATA, TABLE_OWNERS, TABLE_SWITCHED_SHUNT_BANKS, TABLE_SWITCHED_SHUNTS,
+    TABLE_TRANSFORMERS_2W, TABLE_TRANSFORMERS_3W, TABLE_ZONES, table_schema,
 };
 
 use crate::models::{
@@ -185,11 +185,11 @@ fn build_bus_aggregates(network: &Network) -> HashMap<u32, BusAggregate> {
     agg_by_bus
 }
 
-fn canonical_bus_type_code(ty: u8) -> i8 {
+fn canonical_bus_type_token(ty: u8) -> &'static str {
     match ty {
-        3 => 3,
-        2 => 2,
-        _ => 1,
+        3 => BUS_TYPE_SLACK,
+        2 => BUS_TYPE_PV,
+        _ => BUS_TYPE_PQ,
     }
 }
 
@@ -353,10 +353,20 @@ fn resolve_required_transformer_nominal_kv(
     );
 }
 
-fn generator_controlled_bus_id(machine: &Generator) -> i32 {
+fn generator_controlled_bus_id(machine: &Generator) -> Option<i32> {
     let bus = machine.bus as i32;
     let ireg = machine.ireg as i32;
-    if ireg == 0 || ireg == bus { 0 } else { ireg }
+    if ireg == 0 || ireg == bus {
+        None
+    } else {
+        Some(ireg)
+    }
+}
+
+fn timestamp_micros_from_rfc3339(value: &str) -> i64 {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|dt| dt.with_timezone(&Utc).timestamp_micros())
+        .unwrap_or_else(|_| Utc::now().timestamp_micros())
 }
 
 fn infer_study_purpose(title: &str) -> Option<String> {
@@ -403,8 +413,14 @@ pub fn build_metadata_batch(
 
     let base_mva = arrow::array::Float64Array::from(vec![network.sbase]);
     let frequency_hz = arrow::array::Float64Array::from(vec![60.0]);
-    let psse_version = arrow::array::Int32Array::from(vec![0]);
     let is_planning_case = arrow::array::BooleanArray::from(vec![true]);
+
+    let mut source_format = StringDictionaryBuilder::<Int32Type>::new();
+    source_format.append_value("pslf_epc");
+    let mut source_format_version = StringBuilder::new();
+    source_format_version.append_null();
+    let mut source_identity_scheme = StringDictionaryBuilder::<Int32Type>::new();
+    source_identity_scheme.append_value("dense_bus_id");
 
     let mut study_name = StringDictionaryBuilder::<Int32Type>::new();
     study_name.append_value(network.title.as_ref());
@@ -413,10 +429,14 @@ pub fn build_metadata_batch(
     let mut validation_mode = StringDictionaryBuilder::<Int32Type>::new();
     validation_mode.append_value("converter_export");
 
-    let mut timestamp_utc = StringBuilder::new();
-    timestamp_utc.append_value(now_utc.as_str());
-    let mut snapshot_timestamp_utc = StringBuilder::new();
-    snapshot_timestamp_utc.append_value(now_utc.as_str());
+    let utc_tz: Arc<str> = Arc::from("UTC");
+    let ts_micros = timestamp_micros_from_rfc3339(now_utc.as_str());
+    let mut timestamp_utc =
+        TimestampMicrosecondBuilder::with_capacity(1).with_timezone(utc_tz.clone());
+    timestamp_utc.append_value(ts_micros);
+    let mut snapshot_timestamp_utc =
+        TimestampMicrosecondBuilder::with_capacity(1).with_timezone(utc_tz);
+    snapshot_timestamp_utc.append_value(ts_micros);
     let mut raptrix_version = StringBuilder::new();
     raptrix_version.append_value(env!("CARGO_PKG_VERSION"));
     let mut case_fingerprint = StringBuilder::new();
@@ -538,7 +558,9 @@ pub fn build_metadata_batch(
     let mut columns: Vec<arrow::array::ArrayRef> = vec![
         Arc::new(base_mva),
         Arc::new(frequency_hz),
-        Arc::new(psse_version),
+        Arc::new(source_format.finish()),
+        Arc::new(source_format_version.finish()),
+        Arc::new(source_identity_scheme.finish()),
         Arc::new(study_name.finish()),
         Arc::new(timestamp_utc.finish()),
         Arc::new(raptrix_version.finish()),
@@ -599,7 +621,7 @@ pub fn build_buses_batch(
 
     let mut bus_id = Int32Builder::new();
     let mut name = StringDictionaryBuilder::<Int32Type>::new();
-    let mut bus_type = Int8Builder::new();
+    let mut bus_type = StringDictionaryBuilder::<Int32Type>::new();
     let mut p_sched = Float64Builder::new();
     let mut q_sched = Float64Builder::new();
     let mut v_mag_set = Float64Builder::new();
@@ -619,7 +641,7 @@ pub fn build_buses_batch(
     let mut bus_uuid = StringDictionaryBuilder::<Int32Type>::new();
     let mut qd_load_pu = Float64Builder::new();
     let mut qg_sched_pu = Float64Builder::new();
-    // v0.12.5: optional WGS84 GIS (PSLF EPC has no standard lat/lon → null).
+    // Optional WGS84 GIS (PSLF EPC has no standard lat/lon → null).
     let mut latitude = Float64Builder::new();
     let mut longitude = Float64Builder::new();
 
@@ -642,15 +664,15 @@ pub fn build_buses_batch(
         bus_id.append_value(bus.number as i32);
         name.append_value(bus.name.as_ref());
         // PSLF EPC bus records store ty=1 for all connected buses (PV/PQ is implicit from
-        // attached devices). Infer type-2 (PV) from generator presence so that raptrix-core's
-        // Q-switch mechanism fires correctly. Type-3 (slack) is auto-assigned by core when no
+        // attached devices). Infer PV from generator presence so that raptrix-core's
+        // Q-switch mechanism fires correctly. Slack is auto-assigned by core when no
         // explicit swing bus is present in the EPC (area swing_bus=0 for Texas cases).
-        let type_code = if agg.has_generator {
-            2i8
+        let type_token = if agg.has_generator {
+            BUS_TYPE_PV
         } else {
-            canonical_bus_type_code(bus.ty)
+            canonical_bus_type_token(bus.ty)
         };
-        bus_type.append_value(type_code);
+        bus_type.append_value(type_token);
         p_sched.append_value(agg.p_sched);
         q_sched.append_value(agg.q_sched);
         v_mag_set.append_value(v_mag);
@@ -789,7 +811,10 @@ pub fn build_generators_batch(
         ramp_rate_down_mw_min.append_null();
         owner_id.append_null();
         market_resource_id.append_null();
-        controlled_bus_id.append_value(generator_controlled_bus_id(generator));
+        match generator_controlled_bus_id(generator) {
+            Some(v) => controlled_bus_id.append_value(v),
+            None => controlled_bus_id.append_null(),
+        }
         mrid.append_value(synth_generator_mrid(generator.bus, generator.id.as_ref()));
         append_pslf_generator_raw_params(&mut params, generator)
             .context("PSLF generator params")?;
@@ -869,6 +894,8 @@ pub fn build_loads_batch(loads: &[Load], base_mva: f64) -> Result<RecordBatch> {
         name_b.append_null();
     }
 
+    let mrid = new_null_array(&arrow::datatypes::DataType::Utf8, loads.len());
+
     RecordBatch::try_new(
         schema,
         vec![
@@ -882,6 +909,7 @@ pub fn build_loads_batch(loads: &[Load], base_mva: f64) -> Result<RecordBatch> {
             Arc::new(p_y_pu.finish()),
             Arc::new(q_y_pu.finish()),
             Arc::new(name_b.finish()),
+            mrid,
         ],
     )
     .context("building loads batch")
@@ -1280,14 +1308,18 @@ pub fn build_fixed_shunts_batch(shunts: &[FixedShunt], base_mva: f64) -> Result<
         b_pu.append_value(shunt.b / base_mva);
     }
 
+    let bus_id_arr = bus_id.finish();
+    let mrid = new_null_array(&arrow::datatypes::DataType::Utf8, bus_id_arr.len());
+
     RecordBatch::try_new(
         schema,
         vec![
-            Arc::new(bus_id.finish()),
+            Arc::new(bus_id_arr),
             Arc::new(id.finish()),
             Arc::new(status.finish()),
             Arc::new(g_pu.finish()),
             Arc::new(b_pu.finish()),
+            mrid,
         ],
     )
     .context("building fixed_shunts batch")
@@ -1364,10 +1396,13 @@ pub fn build_switched_shunts_batch(
         shunt_id.append_value(format!("{}_shunt_{}", shunt.bus, n));
     }
 
+    let bus_id_arr = bus_id.finish();
+    let mrid = new_null_array(&arrow::datatypes::DataType::Utf8, bus_id_arr.len());
+
     RecordBatch::try_new(
         schema,
         vec![
-            Arc::new(bus_id.finish()),
+            Arc::new(bus_id_arr),
             Arc::new(status.finish()),
             Arc::new(v_low.finish()),
             Arc::new(v_high.finish()),
@@ -1375,6 +1410,7 @@ pub fn build_switched_shunts_batch(
             Arc::new(current_step.finish()),
             Arc::new(b_init_pu.finish()),
             Arc::new(shunt_id.finish()),
+            mrid,
         ],
     )
     .context("building switched_shunts batch")
@@ -1551,6 +1587,15 @@ pub fn build_dynamics_models_batch(records: &[DydModelData]) -> Result<RecordBat
         .data_type()
         .clone();
     let perc1_params_col = new_null_array(&perc1_params_type, records.len());
+    // v0.13.0 classical block: PSLF DYD numeric params are positionally keyed (p0..);
+    // leave classical_params null unless future mapping fills H/D/xd'.
+    let classical_params_col = new_null_array(
+        schema
+            .field_with_name("classical_params")
+            .expect("dynamics_models schema must include classical_params (v0.13.0+)")
+            .data_type(),
+        records.len(),
+    );
 
     RecordBatch::try_new(
         schema,
@@ -1560,6 +1605,7 @@ pub fn build_dynamics_models_batch(records: &[DydModelData]) -> Result<RecordBat
             Arc::new(model_type.finish()),
             params_cast,
             perc1_params_col,
+            classical_params_col,
         ],
     )
     .context("building dynamics_models batch")

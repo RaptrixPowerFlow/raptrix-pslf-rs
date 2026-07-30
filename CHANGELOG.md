@@ -9,7 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No user-facing changes yet._
+_No additional unreleased items._
+
+---
+
+## [0.6.0] - 2026-07-30
+
+### RPF **v0.13.0** (`raptrix-cim-arrow` **0.6.0**)
+
+- **Emit RPF v0.13.0 only** (clean cut; re-export required for all pre-0.13 `.rpf` files).
+- Provenance: `source_format=pslf_epc`, `source_format_version` null (no EPC rev stamp), `source_identity_scheme=dense_bus_id`.
+- Bus types as dictionary tokens `PQ`/`PV`/`Slack`; `controlled_bus_id` null for local IREG; native UTC timestamps.
+- Optional `mrid` on loads/shunts (null from PSLF); `classical_params` column on dynamics (null — DYD params are positional).
+- Root metadata stamps `rpf.identity.model=hybrid_solver_flat_v1`.
+- **`baseline_source_case_id`** replaces any prior `original_sentinel_case_id` wire name (null on standard PSLF planning exports).
+- **Dependency**: `raptrix-cim-arrow` **0.6.0** / git tag **`v0.6.0`**.
 
 ---
 

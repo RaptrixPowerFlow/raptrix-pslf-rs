@@ -8,6 +8,9 @@
 /target
 Cargo.lock
 
+# Local Cargo overrides (target-dir / path patches). Do not commit.
+.cargo/
+
 # =====================================================================
 # CEII / PROPRIETARY DATA — NEVER COMMIT
 # =====================================================================

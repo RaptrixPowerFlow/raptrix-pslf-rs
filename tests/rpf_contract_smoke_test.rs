@@ -5,14 +5,18 @@
 // If a copy of the MPL was not distributed with this file, You can obtain one at
 // https://mozilla.org/MPL/2.0/.
 
-//! Locked RPF interchange contract smoke tests (v0.12.5).
+//! Locked RPF interchange contract smoke tests (v0.13.0).
 
 use std::path::Path;
 
 use anyhow::Result;
-use arrow::array::{Array, BooleanArray, Float64Array, Int8Array, StringArray};
+use arrow::array::{
+    Array, BooleanArray, DictionaryArray, Float64Array, StringArray, TimestampMicrosecondArray,
+};
+use arrow::datatypes::Int32Type;
 use raptrix_cim_arrow::{
-    METADATA_KEY_CASE_MODE, METADATA_KEY_DEFAULT_SHUNT_CONTROL_MODE,
+    BUS_TYPE_PV, IDENTITY_MODEL_HYBRID_SOLVER_FLAT_V1, METADATA_KEY_CASE_MODE,
+    METADATA_KEY_DEFAULT_SHUNT_CONTROL_MODE, METADATA_KEY_IDENTITY_MODEL,
     METADATA_KEY_LOADS_ZIP_FIDELITY_PRESENCE, METADATA_KEY_MRID_SUPPORT, METADATA_KEY_RPF_VERSION,
     METADATA_KEY_SOLVED_STATE_PRESENCE, METADATA_KEY_TRANSFORMER_REPRESENTATION_MODE, RPF_VERSION,
     TABLE_BRANCHES, TABLE_BUSES, TABLE_GENERATORS, TABLE_METADATA, rpf_file_metadata, table_schema,
@@ -28,10 +32,24 @@ fn file_exists(p: &str) -> bool {
     Path::new(p).exists()
 }
 
+fn dict_utf8_at(col: &dyn Array, i: usize) -> &str {
+    let dict = col
+        .as_any()
+        .downcast_ref::<DictionaryArray<Int32Type>>()
+        .expect("expected Dictionary<Int32, Utf8>");
+    assert!(!dict.is_null(i), "dictionary entry {i} must be non-null");
+    let values = dict
+        .values()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("dictionary values must be Utf8");
+    values.value(dict.key(i).expect("dictionary key"))
+}
+
 #[test]
 fn crate_exports_rpf_version_constant() {
     assert_eq!(LIB_RPF_VERSION, RPF_VERSION);
-    assert_eq!(RPF_VERSION, "v0.12.5");
+    assert_eq!(RPF_VERSION, "v0.13.0");
 }
 
 #[test]
@@ -39,10 +57,11 @@ fn generators_schema_includes_trailing_mrid_column() {
     let schema = table_schema(TABLE_GENERATORS).expect("generators schema");
     assert_eq!(schema.fields().len(), 26);
     assert_eq!(schema.field(25).name(), "mrid");
+    assert!(schema.field(24).is_nullable(), "controlled_bus_id nullable");
 }
 
 #[test]
-fn exported_rpf_carries_v0122_contract_metadata() -> Result<()> {
+fn exported_rpf_carries_v0130_contract_metadata() -> Result<()> {
     if !file_exists(EPC_PATH) {
         eprintln!("[skip] proprietary EPC not present");
         return Ok(());
@@ -67,6 +86,12 @@ fn exported_rpf_carries_v0122_contract_metadata() -> Result<()> {
         root_meta.get(METADATA_KEY_RPF_VERSION).map(String::as_str),
         Some(RPF_VERSION),
         "root rpf_version must match locked contract"
+    );
+    assert_eq!(
+        root_meta
+            .get(METADATA_KEY_IDENTITY_MODEL)
+            .map(String::as_str),
+        Some(IDENTITY_MODEL_HYBRID_SOLVER_FLAT_V1),
     );
     assert_eq!(
         root_meta.get(METADATA_KEY_MRID_SUPPORT).map(String::as_str),
@@ -114,21 +139,53 @@ fn exported_rpf_carries_v0122_contract_metadata() -> Result<()> {
         .expect("Boolean");
     assert!(is_planning.value(0), "PSLF exports are planning cases");
 
-    let buses = tables.get(TABLE_BUSES).expect("buses table");
-    let bus_type = buses
-        .column_by_name("type")
-        .expect("type")
-        .as_any()
-        .downcast_ref::<Int8Array>()
-        .expect("Int8");
     assert!(
-        bus_type.iter().any(|v| v == Some(2)),
+        metadata.schema().field_with_name("psse_version").is_err(),
+        "v0.13.0 must not expose psse_version"
+    );
+    assert!(
+        metadata
+            .schema()
+            .field_with_name("baseline_source_case_id")
+            .is_ok(),
+        "baseline_source_case_id must be present"
+    );
+    assert!(
+        metadata
+            .schema()
+            .field_with_name("original_sentinel_case_id")
+            .is_err(),
+        "original_sentinel_case_id must not appear on the wire"
+    );
+
+    let source_format = metadata
+        .column_by_name("source_format")
+        .expect("source_format");
+    assert_eq!(dict_utf8_at(source_format.as_ref(), 0), "pslf_epc");
+    let source_identity = metadata
+        .column_by_name("source_identity_scheme")
+        .expect("source_identity_scheme");
+    assert_eq!(dict_utf8_at(source_identity.as_ref(), 0), "dense_bus_id");
+
+    let timestamp_utc = metadata
+        .column_by_name("timestamp_utc")
+        .expect("timestamp_utc")
+        .as_any()
+        .downcast_ref::<TimestampMicrosecondArray>()
+        .expect("Timestamp(us, UTC)");
+    assert!(timestamp_utc.is_valid(0));
+
+    let buses = tables.get(TABLE_BUSES).expect("buses table");
+    let bus_type = buses.column_by_name("type").expect("type");
+    assert!(
+        (0..bus_type.len()).any(|i| dict_utf8_at(bus_type.as_ref(), i) == BUS_TYPE_PV),
         "PV buses should be present"
     );
 
     let gens = tables.get(TABLE_GENERATORS).expect("generators table");
     assert_eq!(gens.schema().fields().len(), 26);
     assert_eq!(gens.schema().field(25).name(), "mrid");
+    assert!(gens.schema().field(24).is_nullable());
 
     let q_min = gens
         .column_by_name("q_min_mvar")
