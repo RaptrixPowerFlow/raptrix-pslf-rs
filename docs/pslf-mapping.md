@@ -76,11 +76,17 @@ PSLF `svd data` fields are **per-unit on system base** (same as applied by raptr
 
 | Field | EPC token (after `:`) | RPF column | Notes |
 |-------|----------------------|------------|-------|
-| `b_init` | `+9` | `switched_shunts.b_init_pu` | Do **not** divide by `base_mva` on export |
+| `b_init` | `+9` | `switched_shunts.b_init_pu` | Do **not** divide by `base_mva`; force `0` when `status=0` |
 | `vband` | `+12` | `v_low` / `v_high` | Voltage band limits |
 | Step `b` | step list | `b_steps` / banks | Positive steps only; stored in pu |
 
 PSLF expands to granular `switched_shunt_banks` rows (e.g. 2873 steps on large benchmark case). PSS/E often compresses banks (1865 rows). Bus-level `switched_shunts` counts match when the physical device set aligns.
+
+Inactive SVD rows remain present for source inventory, but their operating state is
+suppressed: `status=false`, `current_step=0`, and `b_init_pu=0`. The authored step
+list remains available for a later explicit enable operation. This prevents offline
+devices with non-zero EPC `b_init` (for example series24 buses 3051 and 8005) from
+injecting reactive power on import.
 
 **series24 case4/case6 (157 vs 153):** EPC `svd data` contains **157** primary records per case; PSLF export is faithful (157 rows). Matching PSSE RAW exports **153** rows — four fewer devices in the RAW source, not dropped EPC records. **No parser change**; document as acceptable format gap.
 
@@ -122,9 +128,14 @@ EPC `generator data` primary line (after `:`) token indices relative to the colo
 | `qb` | `+14` | QB (qmin in EPC header) |
 | `mbase` | `+15` | MBASE |
 
-Continuation lines (`/` suffix) carry `vs` at token index 4 when absent on the primary row. PSLF commonly stores **VS=1.0** here as a placeholder; this value is parsed but is **not** used for `v_mag_set` export.
+Continuation lines (`/` suffix) carry `vs` at token index 4 when absent on the primary row. PSLF commonly stores **VS=1.0** here as a placeholder.
 
-**Voltage setpoints (fidelity-first):** generator buses export `v_mag_set = bus.vsched` (EPC bus record colon+2), the regulation setpoint from the EPC bus table. The continuation-line `generator.vs` placeholder (≈1.0) is ignored for `v_mag_set`. For large benchmark case, `vsched` correctly reflects ~1.02–1.04 pu targets across 667 generator buses (previously all were mis-set to 1.0).
+**Voltage seed vs. control target (fidelity-first):**
+
+- `buses.v_mag_set = bus.volt`: the authored operating-point seed used to replay the EPC state.
+- `generators.params["vs"] = bus.vsched`: the AVR voltage-control target. This overrides the machine continuation-line placeholder when a bus record is available.
+
+These values are intentionally distinct. Writing `bus.vsched` into `v_mag_set` perturbs the initial network state and can trigger premature Q-limit switching.
 
 **Bus type mapping (PSLF `ty` → RPF dictionary, RAW IDE–aligned):**
 
@@ -163,7 +174,7 @@ Do **not** force PSSE/PSLF RPF row-count identity. These gaps are acceptable whe
 | `switched_shunt_banks` | Granular steps (2873 large benchmark case) | Compressed banks (1865) | OK |
 | `transformers_3w` | 0 rows (`native-3w`) | Explicit 3W table | OK (2W-expanded topology) |
 | `dynamics_models` | DYD row count | DYR row count | Dynamics only |
-| Generator `v_mag_set` | `bus.vsched` (~1.02–1.04) — **fixed** | RAW VS / bus VM | Correct fidelity; large benchmark case still diverges (SVD b_shunt) |
+| Voltage seed / AVR target | `v_mag_set=bus.volt`; generator `params["vs"]=bus.vsched` | RAW bus VM / machine VS | Separates state replay from control target |
 | Bus `type` | PSLF `ty` + online-machine gate (Slack from `ty=0`) | Explicit RAW IDE tokens | Histograms match RAW on series24 |
 | Branch table rows | Keep OOS branches (`status=false`) | Keep OOS (psse-rs); core native RAW may drop OOS | Compare in-service counts, not raw `get_branches()` |
 | large benchmark case solver-readiness | Not solver-ready (PSLF NR ~30pu stall) | Solver-ready (core v0.5.64) | PSLF format SVD baseline gap |
@@ -200,7 +211,7 @@ Mirrors the style and depth of `docs/psse-mapping.md` in the PSS/E sibling crate
 | Table | Status |
 |-------|--------|
 | `metadata` | Implemented — v0.13.0 provenance, case_mode, modern-grid flags, study/scenario metadata |
-| `buses` | Implemented — dictionary type tokens, vsched PV setpoints, Q aggregation, bus_uuid |
+| `buses` | Implemented — dictionary type tokens, `bus.volt` operating seed, Q aggregation, bus_uuid |
 | `generators` | Implemented — nullable controlled_bus_id, IBR subtype from DYD, params map, Q sanitization |
 | `loads` | Implemented — constant-PQ; ZIP columns null; trailing `mrid` null |
 | `branches` | Implemented — system-base pu R/X/B (parity with psse-rs), FACTS columns null |

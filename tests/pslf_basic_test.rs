@@ -15,7 +15,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::Result;
-use arrow::array::{Array, DictionaryArray, Float64Array, Int32Array, StringArray};
+use arrow::array::{
+    Array, BooleanArray, DictionaryArray, Float64Array, Int32Array, MapArray, StringArray,
+};
 use arrow::datatypes::Int32Type;
 use raptrix_cim_arrow::{
     BUS_TYPE_PQ, BUS_TYPE_PV, BUS_TYPE_SLACK, RPF_VERSION, TABLE_BUSES, TABLE_GENERATORS,
@@ -144,13 +146,12 @@ fn pslf_parser_and_writer_smoke() -> Result<()> {
         .iter()
         .find(|b| b.number == 111180)
         .expect("bus 111180 in parsed EPC");
-    // v_mag_set for generator buses now comes from bus.vsched (EPC bus record, colon+2),
-    // not from the continuation-line generator.vs placeholder.
-    // For bus 111180: vsched = 1.038548 in Texas7k EPC.
+    // v_mag_set is the operating-point seed and must preserve EPC bus.volt.
+    // bus.vsched is the AVR target and is carried separately in generator params["vs"].
     assert!(
-        (v_mag_col.value(bus_idx) - bus_111180.vsched).abs() < 0.001,
-        "gen bus 111180 v_mag_set should follow bus.vsched ({:.6}), got {}",
-        bus_111180.vsched,
+        (v_mag_col.value(bus_idx) - bus_111180.volt).abs() < 1.0e-9,
+        "gen bus 111180 v_mag_set should preserve bus.volt ({:.6}), got {}",
+        bus_111180.volt,
         v_mag_col.value(bus_idx)
     );
     assert!(
@@ -210,6 +211,12 @@ fn pslf_parser_and_writer_smoke() -> Result<()> {
         .as_any()
         .downcast_ref::<Float64Array>()
         .expect("q_max_mvar Float64");
+    let gen_params = gens
+        .column_by_name("params")
+        .expect("params column")
+        .as_any()
+        .downcast_ref::<MapArray>()
+        .expect("params Map");
     let gen_idx = (0..gen_bus_col.len())
         .find(|&i| gen_bus_col.value(i) == 111180)
         .expect("gen 111180 in RPF");
@@ -222,6 +229,28 @@ fn pslf_parser_and_writer_smoke() -> Result<()> {
         (gen_qmax_col.value(gen_idx) - generator.qt).abs() < 0.1,
         "gen 111180 q_max_mvar: got {}",
         gen_qmax_col.value(gen_idx)
+    );
+    let offsets = gen_params.value_offsets();
+    let start = offsets[gen_idx] as usize;
+    let end = offsets[gen_idx + 1] as usize;
+    let param_keys = gen_params
+        .keys()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("params keys Utf8");
+    let param_values = gen_params
+        .values()
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .expect("params values Float64");
+    let vs_param = (start..end)
+        .find(|&i| param_keys.value(i) == "vs")
+        .map(|i| param_values.value(i))
+        .expect("generator params[vs]");
+    assert!(
+        (vs_param - bus_111180.vsched).abs() < 1.0e-9,
+        "generator params[vs] should preserve bus.vsched {}, got {vs_param}",
+        bus_111180.vsched
     );
 
     eprintln!(
@@ -435,6 +464,77 @@ fn series24_case4_svd_count_matches_epc() -> Result<()> {
         Some(157),
         "exported switched_shunts row count"
     );
+    Ok(())
+}
+
+#[test]
+fn series24_inactive_svd_exports_zero_operating_state() -> Result<()> {
+    let epc = "tests/networks/Texas2k_series24_case4_2024lowload.EPC";
+    if !file_exists(epc) {
+        eprintln!("[test] Skipping inactive SVD test — proprietary EPC not present");
+        return Ok(());
+    }
+
+    let net = raptrix_pslf_rs::parser::parse_epc(Path::new(epc))?;
+    for (bus, expected_source_binit) in [(3051, 0.8), (8005, 1.0)] {
+        let shunt = net
+            .switched_shunts
+            .iter()
+            .find(|s| s.bus == bus && s.status == 0)
+            .unwrap_or_else(|| panic!("offline SVD at bus {bus}"));
+        assert!(
+            (shunt.b_init - expected_source_binit).abs() < 1.0e-9,
+            "source EPC b_init retained by parser at bus {bus}"
+        );
+    }
+
+    let tmp = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
+    raptrix_pslf_rs::write_pslf_to_rpf(epc, None, &tmp.to_string_lossy())?;
+    let tables: BTreeMap<_, _> = read_rpf_tables(&tmp)?.into_iter().collect();
+    let shunts = tables
+        .get(raptrix_cim_arrow::TABLE_SWITCHED_SHUNTS)
+        .expect("switched_shunts");
+    let bus_id = shunts
+        .column_by_name("bus_id")
+        .expect("bus_id")
+        .as_any()
+        .downcast_ref::<Int32Array>()
+        .expect("Int32");
+    let status = shunts
+        .column_by_name("status")
+        .expect("status")
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .expect("Boolean");
+    let current_step = shunts
+        .column_by_name("current_step")
+        .expect("current_step")
+        .as_any()
+        .downcast_ref::<Int32Array>()
+        .expect("Int32");
+    let b_init = shunts
+        .column_by_name("b_init_pu")
+        .expect("b_init_pu")
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .expect("Float64");
+
+    for bus in [3051, 8005] {
+        let idx = (0..bus_id.len())
+            .find(|&i| bus_id.value(i) == bus && !status.value(i))
+            .unwrap_or_else(|| panic!("exported offline SVD at bus {bus}"));
+        assert_eq!(
+            current_step.value(idx),
+            0,
+            "inactive SVD current_step at bus {bus}"
+        );
+        assert_eq!(
+            b_init.value(idx),
+            0.0,
+            "inactive SVD b_init_pu at bus {bus}"
+        );
+    }
+
     Ok(())
 }
 

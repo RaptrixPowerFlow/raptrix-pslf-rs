@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stop writing branch/transformer `r`/`x`/`b` as physical ohms via \(Z_\mathrm{base}\). Emit **system-base pu** like `raptrix-psse-rs` (fixes series24 non-convergence from ~132.25× reactance inflation).
 - `transformers_2w.phase_shift` exported in **degrees** per the RPF field guide (was incorrectly converted to radians).
 
+### Operating-state replay
+
+- Export `buses.v_mag_set` from EPC `bus.volt` (operating-point seed), not `bus.vsched`.
+- Preserve `bus.vsched` as the AVR target in `generators.params["vs"]`, replacing the commonly placeholder machine `vs`.
+- Keep inactive switched-shunt rows and step capability, but force `current_step=0` and `b_init_pu=0` so offline SVD devices do not inject reactive power.
+
 ---
 
 ## [0.6.0] - 2026-07-30

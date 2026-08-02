@@ -92,7 +92,7 @@ pub struct BusAggregate {
     p_max_agg: f64,
     qd_load_pu: f64,
     qg_sched_pu: f64,
-    /// Online machine with a non-zero Q span (used for bus Q aggregation / vsched).
+    /// Online machine with a non-zero Q span (used for bus Q-limit aggregation).
     has_generator: bool,
     /// Any online machine (`status != 0`), including zero-Q-span units.
     /// Used for RAW-aligned PV demotion of offline plant buses (`ty=2` + no online gen → PQ).
@@ -251,13 +251,16 @@ fn sanitize_generator_q_limits(
 fn append_pslf_generator_raw_params(
     params: &mut MapBuilder<StringBuilder, Float64Builder>,
     machine: &Generator,
+    bus_vsched: Option<f64>,
 ) -> Result<()> {
     let mut push = |k: &str, v: f64| -> Result<()> {
         params.keys().append_value(k);
         params.values().append_value(v);
         Ok(())
     };
-    push("vs", machine.vs)?;
+    // The machine continuation-line VS is often a 1.0 placeholder in PSLF.
+    // Preserve the authored bus voltage schedule as the AVR control target.
+    push("vs", bus_vsched.unwrap_or(machine.vs))?;
     if machine.ireg > 0 {
         push("ireg", machine.ireg as f64)?;
     }
@@ -637,17 +640,10 @@ pub fn build_buses_batch(
     for bus in buses {
         let agg = agg_by_bus.get(&bus.number).cloned().unwrap_or_default();
         let type_token = canonical_bus_type_token(bus.ty, agg.has_online_machine);
-        // Use EPC vsched for swing / online-machine buses (PV or Slack). The PSLF
-        // continuation-line generator VS token is a placeholder (≈1.0) and must NOT
-        // override the schedule from the bus record.
-        let use_vsched = matches!(type_token, BUS_TYPE_PV | BUS_TYPE_SLACK)
-            || agg.has_online_machine
-            || agg.has_generator;
-        let (v_mag, v_ang) = if use_vsched {
-            sanitize_bus_voltage(bus.vsched, bus.angle)
-        } else {
-            sanitize_bus_voltage(bus.volt, bus.angle)
-        };
+        // buses.v_mag_set is the operating-point seed, not the AVR target. Preserve
+        // the solved/seed voltage from the EPC bus record for every bus. bus.vsched
+        // is carried separately in generators.params["vs"] as the control target.
+        let (v_mag, v_ang) = sanitize_bus_voltage(bus.volt, bus.angle);
         let mut q_min_val = agg.q_min;
         let mut q_max_val = agg.q_max;
         if q_min_val > q_max_val {
@@ -718,11 +714,14 @@ pub fn build_buses_batch(
 
 pub fn build_generators_batch(
     generators: &[Generator],
+    buses: &[Bus],
     dyd_generators: &[DydGeneratorData],
     ibr_subtype_by_gen: &HashMap<(u32, String), String>,
     sanitization_stats: &mut GeneratorQSanitizationStats,
 ) -> Result<RecordBatch> {
     let schema = Arc::new(table_schema(TABLE_GENERATORS).expect("generators schema must exist"));
+    let bus_vsched_by_id: HashMap<u32, f64> =
+        buses.iter().map(|bus| (bus.number, bus.vsched)).collect();
 
     let map_field_names = MapFieldNames {
         entry: "entries".to_string(),
@@ -800,8 +799,12 @@ pub fn build_generators_batch(
             None => controlled_bus_id.append_null(),
         }
         mrid.append_value(synth_generator_mrid(generator.bus, generator.id.as_ref()));
-        append_pslf_generator_raw_params(&mut params, generator)
-            .context("PSLF generator params")?;
+        append_pslf_generator_raw_params(
+            &mut params,
+            generator,
+            bus_vsched_by_id.get(&generator.bus).copied(),
+        )
+        .context("PSLF generator params")?;
         let _ = dyd_generators;
         params
             .append(true)
@@ -1369,9 +1372,16 @@ pub fn build_switched_shunts_batch(
         }
         b_steps.append(true);
 
-        let binit_pu = shunt.b_init;
-        current_step.append_value(estimate_current_step(binit_pu, &step_values_pu));
-        b_init_pu.append_value(binit_pu);
+        // An inactive SVD contributes no initial reactive injection. Keep its row and
+        // available steps for source fidelity, but export a zero operating state.
+        if shunt.status == 0 {
+            current_step.append_value(0);
+            b_init_pu.append_value(0.0);
+        } else {
+            let binit_pu = shunt.b_init;
+            current_step.append_value(estimate_current_step(binit_pu, &step_values_pu));
+            b_init_pu.append_value(binit_pu);
+        }
 
         let n = {
             let cnt = bus_shunt_counter.entry(shunt.bus).or_insert(0);

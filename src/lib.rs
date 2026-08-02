@@ -158,6 +158,7 @@ pub fn write_pslf_to_rpf_with_options(
         TABLE_GENERATORS,
         export::build_generators_batch(
             &network.generators,
+            &network.buses,
             &network.dyd_generators,
             &ibr_subtype_by_gen,
             &mut generator_q_sanitization,
