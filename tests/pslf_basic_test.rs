@@ -18,8 +18,8 @@ use anyhow::Result;
 use arrow::array::{Array, DictionaryArray, Float64Array, Int32Array, StringArray};
 use arrow::datatypes::Int32Type;
 use raptrix_cim_arrow::{
-    BUS_TYPE_PV, RPF_VERSION, TABLE_BUSES, TABLE_GENERATORS, TABLE_LOADS, read_rpf_tables,
-    rpf_file_metadata, summarize_rpf,
+    BUS_TYPE_PQ, BUS_TYPE_PV, BUS_TYPE_SLACK, RPF_VERSION, TABLE_BUSES, TABLE_GENERATORS,
+    TABLE_LOADS, read_rpf_tables, rpf_file_metadata, summarize_rpf,
 };
 
 const EPC_PATH: &str = "tests/networks/Texas7k_20210804.EPC";
@@ -306,6 +306,86 @@ fn transformer_ps_impedance_from_epc_header() -> Result<()> {
     Ok(())
 }
 
+/// Branch R/X/B must be system-base pu (not ohms via Zbase). Twin psse golden for
+/// (1001,1064) has x≈0.0358; the old physical export wrote ≈4.73455 (=0.0358×115²/100).
+#[test]
+fn series24_case1_branch_impedance_is_system_pu() -> Result<()> {
+    let epc = "tests/networks/Texas2k_series24_case1_2016summerPeak.EPC";
+    if !file_exists(epc) {
+        eprintln!("[test] Skipping branch pu test — proprietary EPC not present");
+        return Ok(());
+    }
+
+    let net = raptrix_pslf_rs::parser::parse_epc(Path::new(epc))?;
+    let branch = net
+        .branches
+        .iter()
+        .find(|b| b.from_bus == 1001 && b.to_bus == 1064 && b.ckt.as_ref().trim() == "1")
+        .expect("branch 1001-1064 ckt 1 in EPC");
+    assert!(
+        (branch.x - 0.0358).abs() < 1.0e-6,
+        "parsed EPC x should be system pu 0.0358, got {}",
+        branch.x
+    );
+
+    let tmp = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
+    raptrix_pslf_rs::write_pslf_to_rpf(epc, None, &tmp.to_string_lossy())?;
+    let tables: BTreeMap<_, _> = read_rpf_tables(&tmp)?.into_iter().collect();
+    let branches = tables
+        .get(raptrix_cim_arrow::TABLE_BRANCHES)
+        .expect("branches");
+    let from = branches
+        .column_by_name("from_bus_id")
+        .expect("from_bus_id")
+        .as_any()
+        .downcast_ref::<Int32Array>()
+        .expect("Int32");
+    let to = branches
+        .column_by_name("to_bus_id")
+        .expect("to_bus_id")
+        .as_any()
+        .downcast_ref::<Int32Array>()
+        .expect("Int32");
+    let r = branches
+        .column_by_name("r")
+        .expect("r")
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .expect("Float64");
+    let x = branches
+        .column_by_name("x")
+        .expect("x")
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .expect("Float64");
+    let b = branches
+        .column_by_name("b_shunt")
+        .expect("b_shunt")
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .expect("Float64");
+
+    let idx = (0..from.len())
+        .find(|&i| from.value(i) == 1001 && to.value(i) == 1064)
+        .expect("exported branch 1001-1064");
+    assert!(
+        (x.value(idx) - 0.0358).abs() < 1.0e-6,
+        "exported x must be system pu 0.0358, got {} (ohm-scaled would be ~4.73)",
+        x.value(idx)
+    );
+    assert!(
+        (r.value(idx) - 0.00524).abs() < 1.0e-6,
+        "exported r must be system pu 0.00524, got {}",
+        r.value(idx)
+    );
+    assert!(
+        (b.value(idx) - 0.00609).abs() < 1.0e-6,
+        "exported b_shunt must be system pu 0.00609, got {}",
+        b.value(idx)
+    );
+    Ok(())
+}
+
 #[test]
 fn series25_switched_shunt_row_count_matches_psse() -> Result<()> {
     let epc = "tests/networks/Texas2k_series25_case1_summerpeak.EPC";
@@ -355,5 +435,164 @@ fn series24_case4_svd_count_matches_epc() -> Result<()> {
         Some(157),
         "exported switched_shunts row count"
     );
+    Ok(())
+}
+
+fn dict_utf8_at(col: &dyn Array, i: usize) -> &str {
+    let dict = col
+        .as_any()
+        .downcast_ref::<DictionaryArray<Int32Type>>()
+        .expect("expected Dictionary<Int32, Utf8>");
+    assert!(!dict.is_null(i), "dictionary entry {i} must be non-null");
+    let values = dict
+        .values()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("dictionary values must be Utf8");
+    values.value(dict.key(i).expect("dictionary key"))
+}
+
+/// Texas2k series24 case1/case2: explicit Slack=7389 and RAW-aligned PV/PQ histograms.
+/// Twin RAW IDE counts: PQ=1609, PV=390, Slack=1 (bus 7389).
+#[test]
+fn series24_case1_bus_types_match_raw_ide() -> Result<()> {
+    let epc = "tests/networks/Texas2k_series24_case1_2016summerPeak.EPC";
+    let dyd = "tests/networks/Texas2k_series24_case1_2016summerPeak.dyd";
+    if !file_exists(epc) {
+        eprintln!("[test] Skipping series24 type histogram — proprietary EPC not present");
+        return Ok(());
+    }
+
+    let net = raptrix_pslf_rs::parser::parse_epc(Path::new(epc))?;
+    let swing = net
+        .buses
+        .iter()
+        .find(|b| b.ty == 0)
+        .expect("EPC must contain exactly one ty=0 swing bus");
+    assert_eq!(swing.number, 7389, "series24 case1 swing bus");
+
+    let tmp = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
+    raptrix_pslf_rs::write_pslf_to_rpf(epc, Some(dyd), &tmp.to_string_lossy())?;
+
+    let tables: BTreeMap<_, _> = read_rpf_tables(&tmp)?.into_iter().collect();
+    let buses = tables.get(TABLE_BUSES).expect("buses");
+    let bus_id = buses
+        .column_by_name("bus_id")
+        .expect("bus_id")
+        .as_any()
+        .downcast_ref::<Int32Array>()
+        .expect("Int32");
+    let bus_type = buses.column_by_name("type").expect("type");
+
+    let mut pq = 0usize;
+    let mut pv = 0usize;
+    let mut slack = 0usize;
+    let mut slack_ids = Vec::new();
+    for i in 0..bus_type.len() {
+        match dict_utf8_at(bus_type.as_ref(), i) {
+            t if t == BUS_TYPE_PQ => pq += 1,
+            t if t == BUS_TYPE_PV => pv += 1,
+            t if t == BUS_TYPE_SLACK => {
+                slack += 1;
+                slack_ids.push(bus_id.value(i));
+            }
+            other => panic!("unexpected bus type token {other}"),
+        }
+    }
+
+    assert_eq!(slack, 1, "exactly one Slack bus");
+    assert_eq!(slack_ids, vec![7389], "Slack must be bus 7389 (RAW IDE=3)");
+    assert_eq!(pv, 390, "PV count must match twin RAW IDE=2");
+    assert_eq!(pq, 1609, "PQ count must match twin RAW IDE=1");
+    assert_eq!(pq + pv + slack, 2000);
+
+    Ok(())
+}
+
+#[test]
+fn series24_case2_bus_types_match_raw_ide() -> Result<()> {
+    let epc = "tests/networks/Texas2k_series24_case2_2016lowload.EPC";
+    if !file_exists(epc) {
+        eprintln!("[test] Skipping series24 case2 type histogram — proprietary EPC not present");
+        return Ok(());
+    }
+
+    let tmp = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
+    raptrix_pslf_rs::write_pslf_to_rpf(epc, None, &tmp.to_string_lossy())?;
+
+    let tables: BTreeMap<_, _> = read_rpf_tables(&tmp)?.into_iter().collect();
+    let buses = tables.get(TABLE_BUSES).expect("buses");
+    let bus_id = buses
+        .column_by_name("bus_id")
+        .expect("bus_id")
+        .as_any()
+        .downcast_ref::<Int32Array>()
+        .expect("Int32");
+    let bus_type = buses.column_by_name("type").expect("type");
+
+    let mut pq = 0usize;
+    let mut pv = 0usize;
+    let mut slack = 0usize;
+    let mut slack_ids = Vec::new();
+    for i in 0..bus_type.len() {
+        match dict_utf8_at(bus_type.as_ref(), i) {
+            t if t == BUS_TYPE_PQ => pq += 1,
+            t if t == BUS_TYPE_PV => pv += 1,
+            t if t == BUS_TYPE_SLACK => {
+                slack += 1;
+                slack_ids.push(bus_id.value(i));
+            }
+            other => panic!("unexpected bus type token {other}"),
+        }
+    }
+
+    // Twin RAW (lowload): IDE 1=1803, 2=196, 3=1 @ 7389 — fewer online plants than case1.
+    assert_eq!(slack_ids, vec![7389]);
+    assert_eq!(
+        pv, 196,
+        "case2 PV must match RAW (not inflated offline plants)"
+    );
+    assert_eq!(pq, 1803);
+    assert_eq!(slack, 1);
+    Ok(())
+}
+
+/// case3 summerpeak: twin RAW IDE 1=1464, 2=535, 3=1 @ 7389.
+#[test]
+fn series24_case3_bus_types_match_raw_ide() -> Result<()> {
+    let epc = "tests/networks/Texas2k_series24_case3_2024summerpeak.EPC";
+    if !file_exists(epc) {
+        eprintln!("[test] Skipping series24 case3 type histogram — proprietary EPC not present");
+        return Ok(());
+    }
+
+    let tmp = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
+    raptrix_pslf_rs::write_pslf_to_rpf(epc, None, &tmp.to_string_lossy())?;
+
+    let tables: BTreeMap<_, _> = read_rpf_tables(&tmp)?.into_iter().collect();
+    let buses = tables.get(TABLE_BUSES).expect("buses");
+    let bus_id = buses
+        .column_by_name("bus_id")
+        .expect("bus_id")
+        .as_any()
+        .downcast_ref::<Int32Array>()
+        .expect("Int32");
+    let bus_type = buses.column_by_name("type").expect("type");
+
+    let mut pq = 0usize;
+    let mut pv = 0usize;
+    let mut slack_ids = Vec::new();
+    for i in 0..bus_type.len() {
+        match dict_utf8_at(bus_type.as_ref(), i) {
+            t if t == BUS_TYPE_PQ => pq += 1,
+            t if t == BUS_TYPE_PV => pv += 1,
+            t if t == BUS_TYPE_SLACK => slack_ids.push(bus_id.value(i)),
+            other => panic!("unexpected bus type token {other}"),
+        }
+    }
+
+    assert_eq!(slack_ids, vec![7389]);
+    assert_eq!(pv, 535);
+    assert_eq!(pq, 1464);
     Ok(())
 }

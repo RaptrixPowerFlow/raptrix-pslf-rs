@@ -8,6 +8,11 @@
 /target
 Cargo.lock
 
+# Local secrets (never commit)
+.env
+.env.local
+.env.*.local
+
 # Local Cargo overrides (target-dir / path patches). Do not commit.
 .cargo/
 
@@ -25,7 +30,10 @@ tests/networks/**
 # =====================================================================
 tests/data/external/
 tests/golden/*.rpf
-tests/compare/
+# Scratch pair RPFs from compare scripts (stale pre-0.13 files are not corpus).
+# Canonical corpus is tests/golden/. Regenerate compare/ locally or point core at golden/.
+tests/compare/**/*.rpf
+tests/compare/**/*.log
 
 # Belt-and-suspenders: block ALL power-system vendor data formats.
 *.raw

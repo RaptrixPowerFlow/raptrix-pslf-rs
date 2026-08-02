@@ -92,27 +92,11 @@ pub struct BusAggregate {
     p_max_agg: f64,
     qd_load_pu: f64,
     qg_sched_pu: f64,
+    /// Online machine with a non-zero Q span (used for bus Q aggregation / vsched).
     has_generator: bool,
-}
-
-/// raptrix-core treats non-PSS/E branch/transformer R/X/B as physical (Ω, S) when
-/// `from_nominal_kv` is set and converts with Z_base = V²/S_base. PSLF EPC stores
-/// the same per-unit values as PSS/E RAW, so export must scale into physical units.
-fn impedance_z_base(nominal_kv: f64, base_mva: f64) -> f64 {
-    if nominal_kv > 1.0 {
-        (nominal_kv * nominal_kv) / base_mva.abs().max(1.0e-9)
-    } else {
-        1.0
-    }
-}
-
-fn branch_z_base(from_bus: u32, bus_nominal_kv: &HashMap<u32, f64>, base_mva: f64) -> f64 {
-    let v_nom = bus_nominal_kv.get(&from_bus).copied().unwrap_or(0.0);
-    impedance_z_base(v_nom, base_mva)
-}
-
-fn transformer_z_base(from_kv: f64, to_kv: f64, base_mva: f64) -> f64 {
-    impedance_z_base(from_kv.max(to_kv), base_mva)
+    /// Any online machine (`status != 0`), including zero-Q-span units.
+    /// Used for RAW-aligned PV demotion of offline plant buses (`ty=2` + no online gen → PQ).
+    has_online_machine: bool,
 }
 
 fn build_bus_aggregates(network: &Network) -> HashMap<u32, BusAggregate> {
@@ -160,6 +144,7 @@ fn build_bus_aggregates(network: &Network) -> HashMap<u32, BusAggregate> {
             continue;
         }
         if let Some(agg) = agg_by_bus.get_mut(&generator.bus) {
+            agg.has_online_machine = true;
             agg.p_sched += generator.pg / base_mva;
             agg.q_sched += generator.qg / base_mva;
             agg.qg_sched_pu += generator.qg / base_mva;
@@ -185,10 +170,14 @@ fn build_bus_aggregates(network: &Network) -> HashMap<u32, BusAggregate> {
     agg_by_bus
 }
 
-fn canonical_bus_type_token(ty: u8) -> &'static str {
+/// Map PSLF EPC `ty` → RPF dictionary tokens, aligned with matching PSS/E RAW IDE.
+///
+/// PSLF: `0`=swing, `1`=PQ, `2`=PV. Offline plant buses often remain `ty=2` in EPC while
+/// the twin RAW stores `IDE=1`; demote those to `PQ` unless an online machine is present.
+fn canonical_bus_type_token(ty: u8, has_online_machine: bool) -> &'static str {
     match ty {
-        3 => BUS_TYPE_SLACK,
-        2 => BUS_TYPE_PV,
+        0 | 3 => BUS_TYPE_SLACK,
+        2 if has_online_machine => BUS_TYPE_PV,
         _ => BUS_TYPE_PQ,
     }
 }
@@ -647,10 +636,14 @@ pub fn build_buses_batch(
 
     for bus in buses {
         let agg = agg_by_bus.get(&bus.number).cloned().unwrap_or_default();
-        // For generator buses use the EPC voltage schedule (vsched) as the PV regulation
-        // target. The PSLF continuation-line VS token is a placeholder (≈1.0) and must NOT
-        // override the correct schedule from the bus record.
-        let (v_mag, v_ang) = if agg.has_generator {
+        let type_token = canonical_bus_type_token(bus.ty, agg.has_online_machine);
+        // Use EPC vsched for swing / online-machine buses (PV or Slack). The PSLF
+        // continuation-line generator VS token is a placeholder (≈1.0) and must NOT
+        // override the schedule from the bus record.
+        let use_vsched = matches!(type_token, BUS_TYPE_PV | BUS_TYPE_SLACK)
+            || agg.has_online_machine
+            || agg.has_generator;
+        let (v_mag, v_ang) = if use_vsched {
             sanitize_bus_voltage(bus.vsched, bus.angle)
         } else {
             sanitize_bus_voltage(bus.volt, bus.angle)
@@ -663,15 +656,6 @@ pub fn build_buses_batch(
 
         bus_id.append_value(bus.number as i32);
         name.append_value(bus.name.as_ref());
-        // PSLF EPC bus records store ty=1 for all connected buses (PV/PQ is implicit from
-        // attached devices). Infer PV from generator presence so that raptrix-core's
-        // Q-switch mechanism fires correctly. Slack is auto-assigned by core when no
-        // explicit swing bus is present in the EPC (area swing_bus=0 for Texas cases).
-        let type_token = if agg.has_generator {
-            BUS_TYPE_PV
-        } else {
-            canonical_bus_type_token(bus.ty)
-        };
         bus_type.append_value(type_token);
         p_sched.append_value(agg.p_sched);
         q_sched.append_value(agg.q_sched);
@@ -965,10 +949,10 @@ pub fn build_branches_batch(
         from_bus_id.append_value(branch.from_bus as i32);
         to_bus_id.append_value(branch.to_bus as i32);
         ckt.append_value(branch.ckt.as_ref());
-        let z_base = branch_z_base(branch.from_bus, bus_nominal_kv, base_mva);
-        r.append_value(branch.r * z_base);
-        x.append_value(branch.x * z_base);
-        b_shunt.append_value(branch.b / z_base);
+        // System-base pu (same wire convention as raptrix-psse-rs / PSS/E RAW).
+        r.append_value(branch.r);
+        x.append_value(branch.x);
+        b_shunt.append_value(branch.b);
         tap.append_value(1.0);
         phase.append_value(0.0);
         rate_a.append_value(branch.rate_a / base_mva);
@@ -1104,15 +1088,15 @@ pub fn build_transformers_2w_batch(
             bus_nominal_kv,
             "transformers_2w.to_nominal_kv",
         )?;
-        let z_base = transformer_z_base(from_kv, to_kv, base_mva);
-        r.append_value(t.r * z_base);
-        x.append_value(t.x * z_base);
+        // System-base pu (same wire convention as raptrix-psse-rs / PSS/E RAW).
+        r.append_value(t.r);
+        x.append_value(t.x);
         winding1_r.append_value(0.0);
         winding1_x.append_value(0.0);
         winding2_r.append_value(0.0);
         winding2_x.append_value(0.0);
         g.append_value(0.0);
-        b.append_value(t.b / z_base);
+        b.append_value(t.b);
         let tap = if t.tap > 0.0 { t.tap } else { 1.0 };
         let nominal_tap = if from_kv > 0.0 && to_kv > 0.0 {
             from_kv / to_kv
@@ -1121,7 +1105,8 @@ pub fn build_transformers_2w_batch(
         };
         tap_ratio.append_value(tap);
         nominal_tap_ratio.append_value(nominal_tap);
-        phase_shift.append_value(t.phase_shift.to_radians());
+        // RPF contract: transformers_2w.phase_shift is degrees (see rpf-field-guide).
+        phase_shift.append_value(t.phase_shift);
         vector_group.append_value("unknown");
         rate_a.append_value(t.rate_a / base_mva);
         rate_b.append_value(t.rate_b / base_mva);

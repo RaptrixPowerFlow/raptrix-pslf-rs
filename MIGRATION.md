@@ -21,6 +21,10 @@
 3. Parse native UTC timestamps (or convert via Arrow).
 4. Prefer `classical_params` when present for first-swing machines (PSLF exports leave this null today).
 
+### Golden corpus prefers dynamic
+
+When a `.dyd` companion exists under `tests/networks/`, `tests/golden/<stem>.rpf` is the **dynamic** conversion (parity with `raptrix-psse-rs`). The sweep also emits `<stem>_dynamic.rpf` and a no-DYD `<stem>_static.rpf`, and fails if an attached DYD yields zero `dynamics_models` rows. Regenerate with `cargo test --test golden_test -- --nocapture` or `./scripts/generate_all_rpfs.sh`.
+
 ---
 
 ## v0.5.7 / RPF v0.12.5 (additive — no migration required)

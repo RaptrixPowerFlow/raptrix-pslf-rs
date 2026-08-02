@@ -15,7 +15,7 @@ use arrow::array::{
 };
 use arrow::datatypes::Int32Type;
 use raptrix_cim_arrow::{
-    BUS_TYPE_PV, IDENTITY_MODEL_HYBRID_SOLVER_FLAT_V1, METADATA_KEY_CASE_MODE,
+    BUS_TYPE_PV, BUS_TYPE_SLACK, IDENTITY_MODEL_HYBRID_SOLVER_FLAT_V1, METADATA_KEY_CASE_MODE,
     METADATA_KEY_DEFAULT_SHUNT_CONTROL_MODE, METADATA_KEY_IDENTITY_MODEL,
     METADATA_KEY_LOADS_ZIP_FIDELITY_PRESENCE, METADATA_KEY_MRID_SUPPORT, METADATA_KEY_RPF_VERSION,
     METADATA_KEY_SOLVED_STATE_PRESENCE, METADATA_KEY_TRANSFORMER_REPRESENTATION_MODE, RPF_VERSION,
@@ -180,6 +180,10 @@ fn exported_rpf_carries_v0130_contract_metadata() -> Result<()> {
     assert!(
         (0..bus_type.len()).any(|i| dict_utf8_at(bus_type.as_ref(), i) == BUS_TYPE_PV),
         "PV buses should be present"
+    );
+    assert!(
+        (0..bus_type.len()).any(|i| dict_utf8_at(bus_type.as_ref(), i) == BUS_TYPE_SLACK),
+        "explicit Slack (PSLF ty=0) must be exported — no auto-slack"
     );
 
     let gens = tables.get(TABLE_GENERATORS).expect("generators table");

@@ -51,7 +51,9 @@ pub struct Bus {
     pub number: u32,
     pub name: Box<str>,
     pub kv: f64,
-    pub ty: u8, // bus type code (1=PQ, 2=PV, 3=Slack, etc.)
+    /// PSLF EPC bus type (`colon+1`): `0`=swing, `1`=load/PQ, `2`=generator/PV.
+    /// (Not PSS/E IDE — swing is `0` here, not `3`.)
+    pub ty: u8,
     pub vsched: f64,
     pub volt: f64,  // pu
     pub angle: f64, // degrees

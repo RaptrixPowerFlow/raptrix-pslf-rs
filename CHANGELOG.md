@@ -9,7 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No additional unreleased items._
+### Bus type fidelity (Texas2k series24 / RAW IDE parity)
+
+- Map PSLF `ty=0` → explicit `Slack` (e.g. bus **7389** on series24); never leave zero Slack for core auto-pick.
+- Demote offline plant buses (`ty=2` without an online machine) to `PQ` so PV histograms match twin RAW IDE.
+- Document branch OOS row retention vs core native RAW drop; Eastern/Midwest24k remain psse-rs-only (no EPC).
+- Canonical local corpus remains `tests/golden/` (not stale `tests/compare/`).
+
+### Branch / transformer impedance (system pu)
+
+- Stop writing branch/transformer `r`/`x`/`b` as physical ohms via \(Z_\mathrm{base}\). Emit **system-base pu** like `raptrix-psse-rs` (fixes series24 non-convergence from ~132.25× reactance inflation).
+- `transformers_2w.phase_shift` exported in **degrees** per the RPF field guide (was incorrectly converted to radians).
 
 ---
 

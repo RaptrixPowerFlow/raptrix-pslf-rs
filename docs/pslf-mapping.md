@@ -88,15 +88,11 @@ PSLF expands to granular `switched_shunt_banks` rows (e.g. 2873 steps on large b
 
 ## Branches and transformers (impedance units)
 
-EPC `branch data` and `transformer data` store **R, X, B in per-unit on SBASE** (PSS/E RAW convention). raptrix-core treats non-PSS/E RPF branch/transformer rows with `from_nominal_kv > 0` as **physical units** (Ω, S) and converts with `Z_base = V²/S_base`.
+EPC `branch data` and `transformer data` store **R, X, B in per-unit on SBASE** (PSS/E RAW convention). The RPF wire contract matches PSS/E: write those **system-base pu** values directly into `branches.r` / `branches.x` / `branches.b_shunt` and the transformer equivalents (same as `raptrix-psse-rs`).
 
-**Export rule (`export.rs`):** write physical values into the RPF so import recovers pu:
+Do **not** scale by \(Z_\mathrm{base}=V^2/S_\mathrm{base}\). An older PSLF-only physical-ohm export path inflated series reactance by ~\(115^2/100=132.25\) on 115 kV decks and prevented NR convergence despite correct bus types.
 
-- `r_export = r_pu × Z_base`
-- `x_export = x_pu × Z_base`
-- `b_export = b_pu / Z_base`
-
-Use `from_bus` nominal kV for lines; `max(from_kv, to_kv)` for transformers.
+`from_nominal_kv` / `to_nominal_kv` remain required metadata for topology/GIS consumers; they are not a cue to rewrite impedance into ohms.
 
 **Transformer parse (`parser.rs`):**
 
@@ -130,7 +126,16 @@ Continuation lines (`/` suffix) carry `vs` at token index 4 when absent on the p
 
 **Voltage setpoints (fidelity-first):** generator buses export `v_mag_set = bus.vsched` (EPC bus record colon+2), the regulation setpoint from the EPC bus table. The continuation-line `generator.vs` placeholder (≈1.0) is ignored for `v_mag_set`. For large benchmark case, `vsched` correctly reflects ~1.02–1.04 pu targets across 667 generator buses (previously all were mis-set to 1.0).
 
-**Bus type inference:** EPC bus records store `ty=1` for all connected buses; PV vs PQ is implicit from attached generator records. The export infers dictionary token `PV` from `agg.has_generator` so that raptrix-core's Q-switch mechanism engages. Buses with no generators are exported as `PQ`. `Slack` is NOT explicitly assigned — core auto-selects the largest generator bus (bus 111217 on large benchmark case).
+**Bus type mapping (PSLF `ty` → RPF dictionary, RAW IDE–aligned):**
+
+| PSLF `ty` | Meaning | RPF `buses.type` |
+|-----------|---------|------------------|
+| `0` | swing | `Slack` (always — never demote / override) |
+| `1` | load | `PQ` |
+| `2` | generator | `PV` **only if** an online machine (`status != 0`) is present; else `PQ` |
+| `3` | (rare / PSSE-like) | `Slack` |
+
+Texas2k series24 EPCs store a real swing bus (`ty=0`, bus **7389**) and keep offline plant buses as `ty=2` while the twin RAW uses `IDE=1`. The online-machine gate demotes those offline plants to `PQ` so type histograms match RAW. Area `swing_bus` is often `0` and is **not** used for typing.
 
 **Remote regulation:** `generators.controlled_bus_id` is null for local regulation (`ireg == 0` or `ireg == bus`); otherwise the remote dense bus id.
 
@@ -159,11 +164,13 @@ Do **not** force PSSE/PSLF RPF row-count identity. These gaps are acceptable whe
 | `transformers_3w` | 0 rows (`native-3w`) | Explicit 3W table | OK (2W-expanded topology) |
 | `dynamics_models` | DYD row count | DYR row count | Dynamics only |
 | Generator `v_mag_set` | `bus.vsched` (~1.02–1.04) — **fixed** | RAW VS / bus VM | Correct fidelity; large benchmark case still diverges (SVD b_shunt) |
-| Bus `type` | `PV` from `has_generator` — **fixed** | Explicit RAW bus type tokens | Core Q-switch now engages for Texas2k |
+| Bus `type` | PSLF `ty` + online-machine gate (Slack from `ty=0`) | Explicit RAW IDE tokens | Histograms match RAW on series24 |
+| Branch table rows | Keep OOS branches (`status=false`) | Keep OOS (psse-rs); core native RAW may drop OOS | Compare in-service counts, not raw `get_branches()` |
 | large benchmark case solver-readiness | Not solver-ready (PSLF NR ~30pu stall) | Solver-ready (core v0.5.64) | PSLF format SVD baseline gap |
 | Texas2k_series25 | Solver-ready (0 v-violations, 110 Q-sw) | Solver-ready | parity dv≈0.077 (model semantic gap) |
-| Texas2k_series24 | Converges; 1–14 buses >1.1 pu | Solver-ready | Marginal violations; PSLF/PSSE model differences |
+| Texas2k_series24 | Slack/type aligned with RAW; cold NR expected | Solver-ready | Prior auto-slack mismatch was export bug |
 | ACTIVSg10k/70k | Not converged (expected) | Not converged (expected) | IBR structural; LM+continuation also fails |
+| Eastern / Midwest24k | **Not in this corpus** (no EPC) | Available under psse-rs `tests/data/external/` | psse-rs ownership |
 
 **Harness gates:** `solver_ready` = both paths converge AND all buses within [0.9, 1.1] pu (ACTIVSg exception: both NotConverged). `parity` = |ΔV|/|Δθ| within harness tolerances (2% / 0.6° default).
 
@@ -196,7 +203,7 @@ Mirrors the style and depth of `docs/psse-mapping.md` in the PSS/E sibling crate
 | `buses` | Implemented — dictionary type tokens, vsched PV setpoints, Q aggregation, bus_uuid |
 | `generators` | Implemented — nullable controlled_bus_id, IBR subtype from DYD, params map, Q sanitization |
 | `loads` | Implemented — constant-PQ; ZIP columns null; trailing `mrid` null |
-| `branches` | Implemented — physical R/X/B scaling, FACTS columns null |
+| `branches` | Implemented — system-base pu R/X/B (parity with psse-rs), FACTS columns null |
 | `transformers_2w` / `transformers_3w` | Implemented — native-3w mode (3W table often zero-row) |
 | `switched_shunts` + `switched_shunt_banks` | Implemented — granular PSLF SVD steps; trailing `mrid` null |
 | `fixed_shunts` | Implemented — zero-row when EPC has no explicit shunt table; trailing `mrid` null |
