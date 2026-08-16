@@ -1,5 +1,25 @@
 # Migration — raptrix-pslf-rs
 
+## v0.7.0 / RPF v0.14.0 (additive MINOR — dual-read v0.13.1 / v0.13.0)
+
+`raptrix-pslf-rs` **0.7.0** emits RPF **v0.14.0**.
+
+### What changed
+
+- Writer stamps `v0.14.0`; readers accept **v0.14.0**, **v0.13.1**, and **v0.13.0**.
+- **No re-export required** for existing v0.13.x `.rpf` files.
+- No EPC semantic change. `contingencies` is still a zero-row stub on the shared 10-column schema; `tpl_category` and `reserved` stay null. `contingency_sequences` is omitted.
+- PSLF path still omits `computational_load_profiles` and writes `computational_load_mode = null` (optional CLP columns stay null/absent).
+- **Dependency**: `raptrix-cim-arrow` **0.7.0** / git tag **`v0.7.0`**.
+
+### Consumer checklist
+
+1. Accept `raptrix.version` ∈ {`v0.14.0`, `v0.13.1`, `v0.13.0`}.
+2. Treat `contingencies.tpl_category` / `reserved` as nullable when present; ignore when absent.
+3. Do not require a `contingency_sequences` table on PSLF exports.
+
+---
+
 ## v0.6.0 / RPF v0.13.0 (breaking clean cut — re-export required)
 
 `raptrix-pslf-rs` **0.6.0** emits RPF **v0.13.0** only.
@@ -10,7 +30,7 @@
 - `buses.type` dictionary tokens `PQ`/`PV`/`Slack`; `controlled_bus_id` **null** = local regulation (do not write `0`).
 - Native UTC timestamps; optional load/shunt `mrid` (null); dynamics `classical_params` column present (null unless mapped).
 - Root metadata stamps `rpf.identity.model=hybrid_solver_flat_v1`.
-- **`baseline_source_case_id`** replaces any prior `original_sentinel_case_id` wire name (null on standard PSLF planning exports).
+- **`baseline_source_case_id`** replaces the prior `original_sentinel_case_id` wire name (null on standard PSLF planning exports).
 - **Reader compatibility**: only v0.13.0 / `0.13.0`. **Re-export all goldens and case libraries.** No upgrade CLI for old `.rpf` files.
 - **Dependency**: `raptrix-cim-arrow` **0.6.0** / git tag **`v0.6.0`**.
 

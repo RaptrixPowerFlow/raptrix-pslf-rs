@@ -8,8 +8,8 @@
 //! Basic smoke + cross-validation tests for the PSLF converter.
 //!
 //! These tests are designed to run on developer machines that have the
-//! proprietary/CEII test networks locally. They will be skipped gracefully
-//! if the files are not present.
+//! licensed / confidential test networks locally. They will be skipped
+//! gracefully if the files are not present.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -34,7 +34,7 @@ fn file_exists(p: &str) -> bool {
 #[test]
 fn pslf_parser_and_writer_smoke() -> Result<()> {
     if !file_exists(EPC_PATH) {
-        eprintln!("[test] Skipping PSLF smoke test — proprietary EPC not present");
+        eprintln!("[test] Skipping PSLF smoke test — licensed EPC not present");
         return Ok(());
     }
 
@@ -268,7 +268,7 @@ fn pslf_vs_psse_cross_validation() -> Result<()> {
 
     if !file_exists(epc) || !file_exists(raw) {
         eprintln!(
-            "[test] Skipping cross-validation — one or both proprietary cases not present on this machine"
+            "[test] Skipping cross-validation — one or both licensed cases not present on this machine"
         );
         return Ok(());
     }
@@ -299,7 +299,7 @@ fn pslf_vs_psse_cross_validation() -> Result<()> {
 #[test]
 fn transformer_ps_impedance_from_epc_header() -> Result<()> {
     if !file_exists(EPC_PATH) {
-        eprintln!("[test] Skipping transformer parse test — proprietary EPC not present");
+        eprintln!("[test] Skipping transformer parse test — licensed EPC not present");
         return Ok(());
     }
 
@@ -341,7 +341,7 @@ fn transformer_ps_impedance_from_epc_header() -> Result<()> {
 fn series24_case1_branch_impedance_is_system_pu() -> Result<()> {
     let epc = "tests/networks/Texas2k_series24_case1_2016summerPeak.EPC";
     if !file_exists(epc) {
-        eprintln!("[test] Skipping branch pu test — proprietary EPC not present");
+        eprintln!("[test] Skipping branch pu test — licensed EPC not present");
         return Ok(());
     }
 
@@ -419,7 +419,7 @@ fn series24_case1_branch_impedance_is_system_pu() -> Result<()> {
 fn series25_switched_shunt_row_count_matches_psse() -> Result<()> {
     let epc = "tests/networks/Texas2k_series25_case1_summerpeak.EPC";
     if !file_exists(epc) {
-        eprintln!("[test] Skipping SVD count test — proprietary EPC not present");
+        eprintln!("[test] Skipping SVD count test — licensed EPC not present");
         return Ok(());
     }
 
@@ -445,7 +445,7 @@ fn series25_switched_shunt_row_count_matches_psse() -> Result<()> {
 fn series24_case4_svd_count_matches_epc() -> Result<()> {
     let epc = "tests/networks/Texas2k_series24_case4_2024lowload.EPC";
     if !file_exists(epc) {
-        eprintln!("[test] Skipping series24 SVD count test — proprietary EPC not present");
+        eprintln!("[test] Skipping series24 SVD count test — licensed EPC not present");
         return Ok(());
     }
 
@@ -471,7 +471,7 @@ fn series24_case4_svd_count_matches_epc() -> Result<()> {
 fn series24_inactive_svd_exports_zero_operating_state() -> Result<()> {
     let epc = "tests/networks/Texas2k_series24_case4_2024lowload.EPC";
     if !file_exists(epc) {
-        eprintln!("[test] Skipping inactive SVD test — proprietary EPC not present");
+        eprintln!("[test] Skipping inactive SVD test — licensed EPC not present");
         return Ok(());
     }
 
@@ -559,7 +559,7 @@ fn series24_case1_bus_types_match_raw_ide() -> Result<()> {
     let epc = "tests/networks/Texas2k_series24_case1_2016summerPeak.EPC";
     let dyd = "tests/networks/Texas2k_series24_case1_2016summerPeak.dyd";
     if !file_exists(epc) {
-        eprintln!("[test] Skipping series24 type histogram — proprietary EPC not present");
+        eprintln!("[test] Skipping series24 type histogram — licensed EPC not present");
         return Ok(());
     }
 
@@ -613,7 +613,7 @@ fn series24_case1_bus_types_match_raw_ide() -> Result<()> {
 fn series24_case2_bus_types_match_raw_ide() -> Result<()> {
     let epc = "tests/networks/Texas2k_series24_case2_2016lowload.EPC";
     if !file_exists(epc) {
-        eprintln!("[test] Skipping series24 case2 type histogram — proprietary EPC not present");
+        eprintln!("[test] Skipping series24 case2 type histogram — licensed EPC not present");
         return Ok(());
     }
 
@@ -662,7 +662,7 @@ fn series24_case2_bus_types_match_raw_ide() -> Result<()> {
 fn series24_case3_bus_types_match_raw_ide() -> Result<()> {
     let epc = "tests/networks/Texas2k_series24_case3_2024summerpeak.EPC";
     if !file_exists(epc) {
-        eprintln!("[test] Skipping series24 case3 type histogram — proprietary EPC not present");
+        eprintln!("[test] Skipping series24 case3 type histogram — licensed EPC not present");
         return Ok(());
     }
 

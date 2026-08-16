@@ -5,7 +5,7 @@
 // If a copy of the MPL was not distributed with this file, You can obtain one at
 // https://mozilla.org/MPL/2.0/.
 
-//! Golden integration sweep for proprietary EPC reference cases (local machines only).
+//! Golden integration sweep for licensed EPC reference cases (local machines only).
 //!
 //! **Policy (parity with raptrix-psse-rs):**
 //! - Canonical output is always `tests/golden/<epc-stem>.rpf`.
@@ -220,7 +220,7 @@ fn run_case(
 
 #[test]
 fn golden_build_all_network_epc_cases() {
-    assert_eq!(RPF_VERSION, "v0.13.0");
+    assert_eq!(RPF_VERSION, "v0.14.0");
 
     let networks_dir = Path::new(NETWORKS_DIR);
     if !networks_dir.exists() {

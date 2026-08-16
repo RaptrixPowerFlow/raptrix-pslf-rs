@@ -5,7 +5,7 @@
 // If a copy of the MPL was not distributed with this file, You can obtain one at
 // https://mozilla.org/MPL/2.0/.
 
-//! Locked RPF interchange contract smoke tests (v0.13.0).
+//! Locked RPF interchange contract smoke tests (v0.14.0).
 
 use std::path::Path;
 
@@ -19,7 +19,8 @@ use raptrix_cim_arrow::{
     METADATA_KEY_DEFAULT_SHUNT_CONTROL_MODE, METADATA_KEY_IDENTITY_MODEL,
     METADATA_KEY_LOADS_ZIP_FIDELITY_PRESENCE, METADATA_KEY_MRID_SUPPORT, METADATA_KEY_RPF_VERSION,
     METADATA_KEY_SOLVED_STATE_PRESENCE, METADATA_KEY_TRANSFORMER_REPRESENTATION_MODE, RPF_VERSION,
-    TABLE_BRANCHES, TABLE_BUSES, TABLE_GENERATORS, TABLE_METADATA, rpf_file_metadata, table_schema,
+    TABLE_BRANCHES, TABLE_BUSES, TABLE_CONTINGENCIES, TABLE_CONTINGENCY_SEQUENCES,
+    TABLE_GENERATORS, TABLE_METADATA, rpf_file_metadata, table_schema,
 };
 use raptrix_pslf_rs::{
     ExportOptions, RPF_VERSION as LIB_RPF_VERSION, write_pslf_to_rpf_with_options,
@@ -49,7 +50,7 @@ fn dict_utf8_at(col: &dyn Array, i: usize) -> &str {
 #[test]
 fn crate_exports_rpf_version_constant() {
     assert_eq!(LIB_RPF_VERSION, RPF_VERSION);
-    assert_eq!(RPF_VERSION, "v0.13.0");
+    assert_eq!(RPF_VERSION, "v0.14.0");
 }
 
 #[test]
@@ -63,7 +64,7 @@ fn generators_schema_includes_trailing_mrid_column() {
 #[test]
 fn exported_rpf_carries_v0130_contract_metadata() -> Result<()> {
     if !file_exists(EPC_PATH) {
-        eprintln!("[skip] proprietary EPC not present");
+        eprintln!("[skip] licensed EPC not present");
         return Ok(());
     }
 
@@ -233,6 +234,18 @@ fn exported_rpf_carries_v0130_contract_metadata() -> Result<()> {
     assert!(
         (0..branch_mrid.len()).any(|i| branch_mrid.is_valid(i)),
         "at least one branch row must carry non-null mrid"
+    );
+
+    let contingencies = tables
+        .get(TABLE_CONTINGENCIES)
+        .expect("contingencies table");
+    assert_eq!(contingencies.schema().fields().len(), 10);
+    assert_eq!(contingencies.schema().field(8).name(), "tpl_category");
+    assert_eq!(contingencies.schema().field(9).name(), "reserved");
+    assert_eq!(contingencies.num_rows(), 0);
+    assert!(
+        !tables.contains_key(TABLE_CONTINGENCY_SEQUENCES),
+        "PSLF path must omit contingency_sequences"
     );
 
     Ok(())

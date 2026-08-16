@@ -6,7 +6,7 @@
 // https://mozilla.org/MPL/2.0/.
 
 //! `raptrix-pslf-rs` — High-performance GE PSLF (`.epc` + `.dyd`) →
-//! Raptrix PowerFlow Interchange v0.13.0 converter.
+//! Raptrix PowerFlow Interchange v0.14.0 converter.
 
 pub mod export;
 pub mod models;
@@ -227,6 +227,7 @@ pub fn write_pslf_to_rpf_with_options(
     let root_opts = RootWriteOptions {
         dynamics_are_stub: network.dyd_models.is_empty(),
         contingencies_are_stub: true,
+        include_contingency_sequences: false,
         ..RootWriteOptions::default()
     };
 
