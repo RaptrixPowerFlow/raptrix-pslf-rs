@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 . "$HOME/.cargo/env" 2>/dev/null || true
 
 if [[ ! -d tests/networks ]]; then
-  echo "[skip] tests/networks/ not present — proprietary EPC/DYD corpus is local-only."
+  echo "[skip] tests/networks/ not present — licensed EPC/DYD corpus is local-only."
   exit 0
 fi
 

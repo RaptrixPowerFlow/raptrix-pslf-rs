@@ -64,7 +64,7 @@ fn generators_schema_includes_trailing_mrid_column() {
 #[test]
 fn exported_rpf_carries_v0130_contract_metadata() -> Result<()> {
     if !file_exists(EPC_PATH) {
-        eprintln!("[skip] proprietary EPC not present");
+        eprintln!("[skip] licensed EPC not present");
         return Ok(());
     }
 

@@ -5,7 +5,7 @@
 // If a copy of the MPL was not distributed with this file, You can obtain one at
 // https://mozilla.org/MPL/2.0/.
 
-//! Golden integration sweep for proprietary EPC reference cases (local machines only).
+//! Golden integration sweep for licensed EPC reference cases (local machines only).
 //!
 //! **Policy (parity with raptrix-psse-rs):**
 //! - Canonical output is always `tests/golden/<epc-stem>.rpf`.

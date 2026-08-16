@@ -147,7 +147,7 @@ Standard Rust commands work:
 ```bash
 cargo build --release
 cargo test
-# Regenerate golden RPFs (requires local proprietary EPC/DYD under tests/networks/):
+# Regenerate golden RPFs (requires local licensed EPC/DYD under tests/networks/):
 cargo test --test golden_test -- --nocapture
 # or: ./scripts/generate_all_rpfs.sh
 ```
