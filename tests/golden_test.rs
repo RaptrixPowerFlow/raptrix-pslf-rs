@@ -220,7 +220,7 @@ fn run_case(
 
 #[test]
 fn golden_build_all_network_epc_cases() {
-    assert_eq!(RPF_VERSION, "v0.13.0");
+    assert_eq!(RPF_VERSION, "v0.14.0");
 
     let networks_dir = Path::new(NETWORKS_DIR);
     if !networks_dir.exists() {

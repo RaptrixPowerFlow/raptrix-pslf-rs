@@ -8,8 +8,8 @@
 //! Basic smoke + cross-validation tests for the PSLF converter.
 //!
 //! These tests are designed to run on developer machines that have the
-//! proprietary/CEII test networks locally. They will be skipped gracefully
-//! if the files are not present.
+//! licensed / confidential test networks locally. They will be skipped
+//! gracefully if the files are not present.
 
 use std::collections::BTreeMap;
 use std::path::Path;

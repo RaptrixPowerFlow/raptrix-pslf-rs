@@ -9,11 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.7.0] - 2026-08-16
+
+### RPF v0.14.0 (raptrix-cim-arrow 0.7.0) — additive MINOR
+
+- Bump to `raptrix-cim-arrow` **0.7.0** / RPF **v0.14.0**. No RAW/EPC semantic change.
+- `contingencies` uses the shared 10-column schema; `tpl_category` and `reserved` stay null (zero-row stub).
+- `contingency_sequences` is omitted (`include_contingency_sequences = false`).
+- Readers accept v0.14.0, v0.13.1, and v0.13.0. Pre-0.13 still requires re-export.
+- Dependency: git tag `v0.7.0`.
+
 ### Bus type fidelity (Texas2k series24 / RAW IDE parity)
 
 - Map PSLF `ty=0` → explicit `Slack` (e.g. bus **7389** on series24); never leave zero Slack for core auto-pick.
 - Demote offline plant buses (`ty=2` without an online machine) to `PQ` so PV histograms match twin RAW IDE.
-- Document branch OOS row retention vs core native RAW drop; Eastern/Midwest24k remain psse-rs-only (no EPC).
+- Document branch OOS row retention vs core native RAW drop; larger RAW-only cases remain psse-rs-only (no EPC).
 - Canonical local corpus remains `tests/golden/` (not stale `tests/compare/`).
 
 ### Branch / transformer impedance (system pu)
