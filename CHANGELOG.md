@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.1] - 2026-08-19
+
+### RPF v0.14.1 (raptrix-cim-arrow 0.7.1) — additive membership flags
+
+- Emit trailing nullable `is_secured` / `is_bes` / `is_bps` / `is_bptf` as **null**
+  on `branches`, `transformers_2w`, `transformers_3w`, and `multi_section_lines`.
+  Do not invent BES from kV.
+- Writer stamps `v0.14.1`. Readers still accept v0.14.1 / v0.14.0 / v0.13.x.
+- Pin `raptrix-cim-arrow` to published git tag `v0.7.1`.
+
+---
+
 ## [0.7.0] - 2026-08-16
 
 ### RPF v0.14.0 (raptrix-cim-arrow 0.7.0) — additive MINOR

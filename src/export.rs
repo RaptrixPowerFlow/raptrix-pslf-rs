@@ -1035,6 +1035,11 @@ pub fn build_branches_batch(
             Arc::new(parent_line_id.finish()),
             Arc::new(section_index.finish()),
             Arc::new(mrid.finish()),
+            // v0.14.1: converters leave facility membership unknown.
+            new_null_array(&arrow::datatypes::DataType::Boolean, branches.len()),
+            new_null_array(&arrow::datatypes::DataType::Boolean, branches.len()),
+            new_null_array(&arrow::datatypes::DataType::Boolean, branches.len()),
+            new_null_array(&arrow::datatypes::DataType::Boolean, branches.len()),
         ],
     )
     .context("building branches batch")
@@ -1152,6 +1157,11 @@ pub fn build_transformers_2w_batch(
             Arc::new(from_nominal_kv.finish()),
             Arc::new(to_nominal_kv.finish()),
             Arc::new(mrid.finish()),
+            // v0.14.1: converters leave facility membership unknown.
+            new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
+            new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
+            new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
+            new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
         ],
     )
     .context("building transformers_2w batch")
@@ -1273,6 +1283,11 @@ pub fn build_transformers_3w_batch(
             Arc::new(nominal_kv_m.finish()),
             Arc::new(nominal_kv_l.finish()),
             Arc::new(mrid.finish()),
+            // v0.14.1: converters leave facility membership unknown.
+            new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
+            new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
+            new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
+            new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
         ],
     )
     .context("building transformers_3w batch")

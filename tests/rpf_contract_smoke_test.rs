@@ -5,7 +5,7 @@
 // If a copy of the MPL was not distributed with this file, You can obtain one at
 // https://mozilla.org/MPL/2.0/.
 
-//! Locked RPF interchange contract smoke tests (v0.14.0).
+//! Locked RPF interchange contract smoke tests (v0.14.1).
 
 use std::path::Path;
 
@@ -50,7 +50,7 @@ fn dict_utf8_at(col: &dyn Array, i: usize) -> &str {
 #[test]
 fn crate_exports_rpf_version_constant() {
     assert_eq!(LIB_RPF_VERSION, RPF_VERSION);
-    assert_eq!(RPF_VERSION, "v0.14.0");
+    assert_eq!(RPF_VERSION, "v0.14.1");
 }
 
 #[test]
@@ -223,8 +223,20 @@ fn exported_rpf_carries_v0130_contract_metadata() -> Result<()> {
     );
 
     let branches = tables.get(TABLE_BRANCHES).expect("branches table");
-    assert_eq!(branches.schema().fields().len(), 28);
+    assert_eq!(branches.schema().fields().len(), 32);
     assert_eq!(branches.schema().field(27).name(), "mrid");
+    assert_eq!(branches.schema().field(28).name(), "is_secured");
+    assert_eq!(branches.schema().field(31).name(), "is_bptf");
+    for name in ["is_secured", "is_bes", "is_bps", "is_bptf"] {
+        let col = branches
+            .column_by_name(name)
+            .unwrap_or_else(|| panic!("{name}"));
+        assert_eq!(
+            col.null_count(),
+            col.len(),
+            "{name} must be all-null from converter"
+        );
+    }
     let branch_mrid = branches
         .column_by_name("mrid")
         .expect("mrid")

@@ -11,7 +11,7 @@
 
 **raptrix-pslf-rs**
 
-This document provides the field-by-field rules for translating GE PSLF EPC (power flow) and DYD (dynamics) records into the Raptrix PowerFlow Interchange (`.rpf` / RPF **v0.14.0**) Apache Arrow schema.
+This document provides the field-by-field rules for translating GE PSLF EPC (power flow) and DYD (dynamics) records into the Raptrix PowerFlow Interchange (`.rpf` / RPF **v0.14.1**) Apache Arrow schema.
 
 **Fidelity policy**: numeric fields are written exactly as they appear in the source EPC file unless an explicit normalisation rule is documented below. No value clamping, substitution, or scaling is applied at parse time except where required to match the RPF schema units (e.g. MVA → per-unit on SBASE). Validation and singularity handling are the responsibility of the downstream solver.
 
@@ -19,7 +19,8 @@ This document provides the field-by-field rules for translating GE PSLF EPC (pow
 
 ## Version compatibility
 
-- **RPF contract**: **v0.14.0** emit (`raptrix-cim-arrow` 0.7.0); dual-read **v0.13.1** / **v0.13.0**. Pre-0.13 `.rpf` files must be re-exported. Optional CLP columns are not authored on this path.
+- **RPF contract**: **v0.14.1** emit (`raptrix-cim-arrow` 0.7.1); dual-read **v0.14.0** / **v0.13.1** / **v0.13.0**. Pre-0.13 `.rpf` files must be re-exported. Optional CLP columns are not authored on this path.
+- Trailing nullable **`is_secured` / `is_bes` / `is_bps` / `is_bptf`** on `branches`, `transformers_2w`, `transformers_3w`, and `multi_section_lines` are **null**. Do not invent BES from kV.
 - Equipment tables include nullable trailing **`mrid`** on new exports; `buses.latitude` / `buses.longitude` are null (no WGS84 in EPC).
 - Optional tables (`remedial_action_schemes`, `contingency_island_analysis`, `contingency_sequences`, `scenario_context`, computational load profiles) are not emitted on the standard PSLF export path. `contingencies` is a zero-row stub (`tpl_category` / `reserved` null).
 - Targets GE PSLF EPC files compatible with the provided reference cases (Texas synthetic grids).
@@ -220,6 +221,6 @@ Mirrors the style and depth of `docs/psse-mapping.md` in the PSS/E sibling crate
 | `fixed_shunts` | Implemented — zero-row when EPC has no explicit shunt table; trailing `mrid` null |
 | `dynamics_models` | Implemented when `.dyd` supplied; `classical_params` null |
 | `areas`, `zones`, `owners` | Implemented |
-| `contingencies` | Zero-row stub — 10-column v0.14 schema; `tpl_category` / `reserved` null |
+| `contingencies` | Zero-row stub — 10-column v0.14.1 schema; `tpl_category` / `reserved` null |
 
 Optional tables (`remedial_action_schemes`, `contingency_island_analysis`, `contingency_sequences`, `scenario_context`, computational load profiles) are not emitted on the standard PSLF path.

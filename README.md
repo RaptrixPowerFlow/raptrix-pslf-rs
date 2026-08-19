@@ -62,7 +62,7 @@ Runs basic structural checks on an `.epc` (parse success + required table presen
 
 ## Fidelity & Modern Grid Support
 
-- Emits the full set of **18** canonical required RPF **v0.14.0** root tables (zero-row where appropriate). Nullable `buses.latitude` / `buses.longitude` are always null (no WGS84 in EPC). `contingencies` is a zero-row stub; `contingency_sequences` is omitted.
+- Emits the full set of **18** canonical required RPF **v0.14.1** root tables (zero-row where appropriate). Nullable `buses.latitude` / `buses.longitude` are always null (no WGS84 in EPC). Facility-membership flags on circuits and transformers are **null**. `contingencies` is a zero-row stub; `contingency_sequences` is omitted.
 - IBR classification driven from `.dyd` model records (GENROU family + REPC_A / equivalent, matching psse-rs DYR logic where possible).
 - Deterministic `case_fingerprint`, `bus_uuid` generation, and slack selection.
 - Same sanitization and interchange-boundary rules as the PSS/E sibling.
@@ -156,7 +156,7 @@ Golden policy (parity with `raptrix-psse-rs`): canonical `tests/golden/<stem>.rp
 
 ## Versioning & Schema Contract
 
-This crate is pinned to **`raptrix-cim-arrow` 0.7.0** (git tag `v0.7.0`, RPF **v0.14.0**), matching `raptrix-psse-rs`. For a sibling `raptrix-cim-rs` checkout, use a **local** `[patch]` in `.cargo/config.toml` (not committed). Every emitted `.rpf` is validated against the locked contract before returning and carries synthesized **`mrid`** identifiers on equipment tables. Readers accept v0.14.0, v0.13.1, and v0.13.0; pre-0.13 files must be re-exported; see [MIGRATION.md](MIGRATION.md).
+This crate is pinned to **`raptrix-cim-arrow` 0.7.1** (git tag `v0.7.1`, RPF **v0.14.1**), matching `raptrix-psse-rs`. For a sibling `raptrix-cim-rs` checkout, use a **local** `[patch]` in `.cargo/config.toml` (not committed). Every emitted `.rpf` is validated against the locked contract before returning and carries synthesized **`mrid`** identifiers on equipment tables. Facility-membership flags are emitted null (do not invent BES from kV). Readers accept v0.14.1, v0.14.0, v0.13.1, and v0.13.0; pre-0.13 files must be re-exported; see [MIGRATION.md](MIGRATION.md).
 
 See [raptrix-cim-rs schema-contract](https://github.com/RaptrixPowerFlow/raptrix-cim-rs/blob/main/docs/schema-contract.md) for the full RPF specification.
 

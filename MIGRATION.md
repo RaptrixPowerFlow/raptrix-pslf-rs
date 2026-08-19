@@ -1,5 +1,24 @@
 # Migration — raptrix-pslf-rs
 
+## v0.7.1 / RPF v0.14.1 (additive membership flags)
+
+`raptrix-pslf-rs` **0.7.1** emits RPF **v0.14.1**.
+
+### What changed
+
+- Writer stamps `v0.14.1`; readers accept **v0.14.1**, **v0.14.0**, **v0.13.1**, and **v0.13.0**.
+- Trailing nullable `is_secured` / `is_bes` / `is_bps` / `is_bptf` on `branches`,
+  `transformers_2w`, `transformers_3w`, and `multi_section_lines` are **null**.
+  Do not invent BES from kV.
+- **No re-export required** for existing v0.14.0 / v0.13.x `.rpf` files.
+- **Dependency**: `raptrix-cim-arrow` **0.7.1** / git tag **`v0.7.1`**.
+
+### Consumer checklist
+
+1. Accept `raptrix.version` ∈ {`v0.14.1`, `v0.14.0`, `v0.13.1`, `v0.13.0`}.
+2. Treat the four membership flags as nullable; **null** means unknown.
+3. Do not infer `is_bes` from nominal kV.
+
 ## v0.7.0 / RPF v0.14.0 (additive MINOR — dual-read v0.13.1 / v0.13.0)
 
 `raptrix-pslf-rs` **0.7.0** emits RPF **v0.14.0**.
