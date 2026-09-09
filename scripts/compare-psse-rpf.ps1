@@ -205,6 +205,13 @@ $Cases = @(
         Dyd  = Join-Path $NetworksDir "ACTIVSg70k_dynamics.dyd"
         Raw  = Join-Path $ExternalDir "ACTIVSg70k.RAW"
         Dyr  = Join-Path $ExternalDir "ACTIVSg70k_dynamics.dyr"
+    },
+    @{
+        Name = "MemphisCase2026_Mar7"
+        Epc  = Join-Path $NetworksDir "MemphisCase2026_Mar7.EPC"
+        Dyd  = Join-Path $NetworksDir "MemphisCase2026_Mar7_Dynamics.dyd"
+        Raw  = Join-Path $ExternalDir "MemphisCase2026_Mar7.RAW"
+        Dyr  = Join-Path $ExternalDir "MemphisCase2026_Mar7_Dynamics.dyr"
     }
 )
 

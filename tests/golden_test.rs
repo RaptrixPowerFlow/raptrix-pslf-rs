@@ -249,7 +249,10 @@ fn run_case(
 
 #[test]
 fn golden_build_all_network_epc_cases() {
-    assert_eq!(RPF_VERSION, "v0.14.1");
+    assert!(
+        matches!(RPF_VERSION, "v0.14.3"),
+        "unexpected RPF_VERSION {RPF_VERSION}"
+    );
 
     let networks_dir = Path::new(NETWORKS_DIR);
     if !networks_dir.exists() {

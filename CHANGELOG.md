@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-09-09
+
+### RPF v0.14.3 (raptrix-cim-arrow 0.7.3) — switched-shunt control pad
+
+- Pin `raptrix-cim-arrow` to git tag `v0.7.3` and `arrow` **59.3**.
+- Writer stamps `v0.14.3`. Pad `switched_shunts.shunt_control_mode` and
+  `regulated_bus_id` as **null**. Do not invent PSS/E MODSW from EPC SVD.
+- Dual-read v0.14.2 / v0.14.1 / v0.14.0 / v0.13.x.
+- Toolchain **1.97.1**.
+
+### Golden corpus
+
+- Added **MemphisCase2026_Mar7** (~993-bus TAMU IBR-heavy synthetic) to the
+  local `tests/networks/` golden sweep (`.EPC` + `_Dynamics.dyd`). Canonical
+  `tests/golden/` output is dynamic when the DYD is present. Dual-format
+  compare scripts (`compare-psse-rpf.sh` / `.ps1`) include the matching
+  PSS/E stem.
+
+### Fixed
+
+- **Windows-1252 EPC/DYD titles**: PowerWorld smart quotes (`0x93`/`0x94`) in
+  citation lines are decoded instead of dropping the line.
+- Trailing nullable transformer columns added by later RPF minors (tap
+  control on v0.14.2) are padded null so local sibling `raptrix-cim-arrow`
+  patches still export.
+
 ---
 
 ## [0.7.1] - 2026-08-19

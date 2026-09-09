@@ -1,5 +1,22 @@
 # Migration — raptrix-pslf-rs
 
+## v0.7.3 / RPF v0.14.3 (additive switched-shunt control pad)
+
+`raptrix-pslf-rs` **0.7.3** emits RPF **v0.14.3**.
+
+### What changed
+
+- Writer stamps `v0.14.3`; readers accept **v0.14.3** through **v0.13.0**.
+- Trailing nullable `shunt_control_mode` / `regulated_bus_id` on `switched_shunts` are **null**.
+  Do not invent PSS/E MODSW from EPC bank shape.
+- **Dependency**: `raptrix-cim-arrow` **0.7.3** / git tag **`v0.7.3`**, Arrow **59.3**.
+
+### Consumer checklist
+
+1. Accept `raptrix.version` ∈ {`v0.14.3`, `v0.14.2`, `v0.14.1`, `v0.14.0`, `v0.13.1`, `v0.13.0`}.
+2. Treat missing or null shunt-control columns as unspecified.
+3. Do not infer `continuous_voltage` from a single N=1 block.
+
 ## v0.7.1 / RPF v0.14.1 (additive membership flags)
 
 `raptrix-pslf-rs` **0.7.1** emits RPF **v0.14.1**.

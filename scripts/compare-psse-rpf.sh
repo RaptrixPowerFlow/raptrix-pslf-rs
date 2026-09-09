@@ -135,6 +135,12 @@ compare_case "ACTIVSg70k" \
   "$PSSE/tests/data/external/ACTIVSg70k.RAW" \
   "$PSSE/tests/data/external/ACTIVSg70k_dynamics.dyr"
 
+compare_case "MemphisCase2026_Mar7" \
+  "$PSLF/tests/networks/MemphisCase2026_Mar7.EPC" \
+  "$PSLF/tests/networks/MemphisCase2026_Mar7_Dynamics.dyd" \
+  "$PSSE/tests/data/external/MemphisCase2026_Mar7.RAW" \
+  "$PSSE/tests/data/external/MemphisCase2026_Mar7_Dynamics.dyr"
+
 echo ""
 echo "Done. RPF files written to:"
 echo "  $OUT/pslf/"

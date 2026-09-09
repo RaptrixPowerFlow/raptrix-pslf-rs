@@ -605,6 +605,21 @@ pub fn build_metadata_batch(
     RecordBatch::try_new(schema, columns).context("building metadata batch")
 }
 
+fn pad_trailing_null_columns(
+    schema: &arrow::datatypes::Schema,
+    columns: &mut Vec<Arc<dyn arrow::array::Array>>,
+) {
+    let n_rows = columns.first().map(|c| c.len()).unwrap_or(0);
+    for field in schema.fields().iter().skip(columns.len()) {
+        debug_assert!(
+            field.is_nullable(),
+            "unbuilt column '{}' must be nullable",
+            field.name()
+        );
+        columns.push(new_null_array(field.data_type(), n_rows));
+    }
+}
+
 pub fn build_buses_batch(
     buses: &[Bus],
     agg_by_bus: &HashMap<u32, BusAggregate>,
@@ -1131,40 +1146,38 @@ pub fn build_transformers_2w_batch(
         ));
     }
 
-    RecordBatch::try_new(
-        schema,
-        vec![
-            Arc::new(from_bus_id.finish()),
-            Arc::new(to_bus_id.finish()),
-            Arc::new(ckt.finish()),
-            Arc::new(r.finish()),
-            Arc::new(x.finish()),
-            Arc::new(winding1_r.finish()),
-            Arc::new(winding1_x.finish()),
-            Arc::new(winding2_r.finish()),
-            Arc::new(winding2_x.finish()),
-            Arc::new(g.finish()),
-            Arc::new(b.finish()),
-            Arc::new(tap_ratio.finish()),
-            Arc::new(nominal_tap_ratio.finish()),
-            Arc::new(phase_shift.finish()),
-            Arc::new(vector_group.finish()),
-            Arc::new(rate_a.finish()),
-            Arc::new(rate_b.finish()),
-            Arc::new(rate_c.finish()),
-            Arc::new(status.finish()),
-            Arc::new(name_b.finish()),
-            Arc::new(from_nominal_kv.finish()),
-            Arc::new(to_nominal_kv.finish()),
-            Arc::new(mrid.finish()),
-            // v0.14.1: converters leave facility membership unknown.
-            new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
-            new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
-            new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
-            new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
-        ],
-    )
-    .context("building transformers_2w batch")
+    let mut columns: Vec<Arc<dyn arrow::array::Array>> = vec![
+        Arc::new(from_bus_id.finish()),
+        Arc::new(to_bus_id.finish()),
+        Arc::new(ckt.finish()),
+        Arc::new(r.finish()),
+        Arc::new(x.finish()),
+        Arc::new(winding1_r.finish()),
+        Arc::new(winding1_x.finish()),
+        Arc::new(winding2_r.finish()),
+        Arc::new(winding2_x.finish()),
+        Arc::new(g.finish()),
+        Arc::new(b.finish()),
+        Arc::new(tap_ratio.finish()),
+        Arc::new(nominal_tap_ratio.finish()),
+        Arc::new(phase_shift.finish()),
+        Arc::new(vector_group.finish()),
+        Arc::new(rate_a.finish()),
+        Arc::new(rate_b.finish()),
+        Arc::new(rate_c.finish()),
+        Arc::new(status.finish()),
+        Arc::new(name_b.finish()),
+        Arc::new(from_nominal_kv.finish()),
+        Arc::new(to_nominal_kv.finish()),
+        Arc::new(mrid.finish()),
+        // v0.14.1: converters leave facility membership unknown.
+        new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
+        new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
+        new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
+        new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
+    ];
+    pad_trailing_null_columns(schema.as_ref(), &mut columns);
+    RecordBatch::try_new(schema, columns).context("building transformers_2w batch")
 }
 
 pub fn build_transformers_3w_batch(
@@ -1255,42 +1268,40 @@ pub fn build_transformers_3w_batch(
         ));
     }
 
-    RecordBatch::try_new(
-        schema,
-        vec![
-            Arc::new(bus_h_id.finish()),
-            Arc::new(bus_m_id.finish()),
-            Arc::new(bus_l_id.finish()),
-            Arc::new(star_bus_id.finish()),
-            Arc::new(ckt.finish()),
-            Arc::new(r_hm.finish()),
-            Arc::new(x_hm.finish()),
-            Arc::new(r_hl.finish()),
-            Arc::new(x_hl.finish()),
-            Arc::new(r_ml.finish()),
-            Arc::new(x_ml.finish()),
-            Arc::new(tap_h.finish()),
-            Arc::new(tap_m.finish()),
-            Arc::new(tap_l.finish()),
-            Arc::new(phase_shift.finish()),
-            Arc::new(vector_group.finish()),
-            Arc::new(rate_a.finish()),
-            Arc::new(rate_b.finish()),
-            Arc::new(rate_c.finish()),
-            Arc::new(status.finish()),
-            Arc::new(name_b.finish()),
-            Arc::new(nominal_kv_h.finish()),
-            Arc::new(nominal_kv_m.finish()),
-            Arc::new(nominal_kv_l.finish()),
-            Arc::new(mrid.finish()),
-            // v0.14.1: converters leave facility membership unknown.
-            new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
-            new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
-            new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
-            new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
-        ],
-    )
-    .context("building transformers_3w batch")
+    let mut columns: Vec<Arc<dyn arrow::array::Array>> = vec![
+        Arc::new(bus_h_id.finish()),
+        Arc::new(bus_m_id.finish()),
+        Arc::new(bus_l_id.finish()),
+        Arc::new(star_bus_id.finish()),
+        Arc::new(ckt.finish()),
+        Arc::new(r_hm.finish()),
+        Arc::new(x_hm.finish()),
+        Arc::new(r_hl.finish()),
+        Arc::new(x_hl.finish()),
+        Arc::new(r_ml.finish()),
+        Arc::new(x_ml.finish()),
+        Arc::new(tap_h.finish()),
+        Arc::new(tap_m.finish()),
+        Arc::new(tap_l.finish()),
+        Arc::new(phase_shift.finish()),
+        Arc::new(vector_group.finish()),
+        Arc::new(rate_a.finish()),
+        Arc::new(rate_b.finish()),
+        Arc::new(rate_c.finish()),
+        Arc::new(status.finish()),
+        Arc::new(name_b.finish()),
+        Arc::new(nominal_kv_h.finish()),
+        Arc::new(nominal_kv_m.finish()),
+        Arc::new(nominal_kv_l.finish()),
+        Arc::new(mrid.finish()),
+        // v0.14.1: converters leave facility membership unknown.
+        new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
+        new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
+        new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
+        new_null_array(&arrow::datatypes::DataType::Boolean, transformers.len()),
+    ];
+    pad_trailing_null_columns(schema.as_ref(), &mut columns);
+    RecordBatch::try_new(schema, columns).context("building transformers_3w batch")
 }
 
 pub fn build_fixed_shunts_batch(shunts: &[FixedShunt], base_mva: f64) -> Result<RecordBatch> {
@@ -1409,21 +1420,20 @@ pub fn build_switched_shunts_batch(
     let bus_id_arr = bus_id.finish();
     let mrid = new_null_array(&arrow::datatypes::DataType::Utf8, bus_id_arr.len());
 
-    RecordBatch::try_new(
-        schema,
-        vec![
-            Arc::new(bus_id_arr),
-            Arc::new(status.finish()),
-            Arc::new(v_low.finish()),
-            Arc::new(v_high.finish()),
-            Arc::new(b_steps.finish()),
-            Arc::new(current_step.finish()),
-            Arc::new(b_init_pu.finish()),
-            Arc::new(shunt_id.finish()),
-            mrid,
-        ],
-    )
-    .context("building switched_shunts batch")
+    let mut columns: Vec<Arc<dyn arrow::array::Array>> = vec![
+        Arc::new(bus_id_arr),
+        Arc::new(status.finish()),
+        Arc::new(v_low.finish()),
+        Arc::new(v_high.finish()),
+        Arc::new(b_steps.finish()),
+        Arc::new(current_step.finish()),
+        Arc::new(b_init_pu.finish()),
+        Arc::new(shunt_id.finish()),
+        mrid,
+    ];
+    // v0.14.3 shunt control: do not invent PSS/E MODSW from EPC SVD.
+    pad_trailing_null_columns(schema.as_ref(), &mut columns);
+    RecordBatch::try_new(schema, columns).context("building switched_shunts batch")
 }
 
 pub fn build_switched_shunt_banks_batch(rows: &[SwitchedShuntBankRow]) -> Result<RecordBatch> {

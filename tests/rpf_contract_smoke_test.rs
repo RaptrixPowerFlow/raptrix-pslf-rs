@@ -5,7 +5,7 @@
 // If a copy of the MPL was not distributed with this file, You can obtain one at
 // https://mozilla.org/MPL/2.0/.
 
-//! Locked RPF interchange contract smoke tests (v0.14.1).
+//! Locked RPF interchange contract smoke tests (v0.14.3).
 
 use std::path::Path;
 
@@ -20,7 +20,7 @@ use raptrix_cim_arrow::{
     METADATA_KEY_LOADS_ZIP_FIDELITY_PRESENCE, METADATA_KEY_MRID_SUPPORT, METADATA_KEY_RPF_VERSION,
     METADATA_KEY_SOLVED_STATE_PRESENCE, METADATA_KEY_TRANSFORMER_REPRESENTATION_MODE, RPF_VERSION,
     TABLE_BRANCHES, TABLE_BUSES, TABLE_CONTINGENCIES, TABLE_CONTINGENCY_SEQUENCES,
-    TABLE_GENERATORS, TABLE_METADATA, rpf_file_metadata, table_schema,
+    TABLE_GENERATORS, TABLE_METADATA, TABLE_SWITCHED_SHUNTS, rpf_file_metadata, table_schema,
 };
 use raptrix_pslf_rs::{
     ExportOptions, RPF_VERSION as LIB_RPF_VERSION, write_pslf_to_rpf_with_options,
@@ -50,7 +50,10 @@ fn dict_utf8_at(col: &dyn Array, i: usize) -> &str {
 #[test]
 fn crate_exports_rpf_version_constant() {
     assert_eq!(LIB_RPF_VERSION, RPF_VERSION);
-    assert_eq!(RPF_VERSION, "v0.14.1");
+    assert!(
+        matches!(RPF_VERSION, "v0.14.3"),
+        "unexpected RPF_VERSION {RPF_VERSION}"
+    );
 }
 
 #[test]
@@ -247,6 +250,18 @@ fn exported_rpf_carries_v0130_contract_metadata() -> Result<()> {
         (0..branch_mrid.len()).any(|i| branch_mrid.is_valid(i)),
         "at least one branch row must carry non-null mrid"
     );
+
+    let switched = tables
+        .get(TABLE_SWITCHED_SHUNTS)
+        .expect("switched_shunts table");
+    for name in ["shunt_control_mode", "regulated_bus_id"] {
+        let col = switched.column_by_name(name).expect(name);
+        assert_eq!(
+            col.null_count(),
+            col.len(),
+            "{name} must be all-null (do not invent PSS/E MODSW)"
+        );
+    }
 
     let contingencies = tables
         .get(TABLE_CONTINGENCIES)

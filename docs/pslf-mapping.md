@@ -11,7 +11,7 @@
 
 **raptrix-pslf-rs**
 
-This document provides the field-by-field rules for translating GE PSLF EPC (power flow) and DYD (dynamics) records into the Raptrix PowerFlow Interchange (`.rpf` / RPF **v0.14.1**) Apache Arrow schema.
+This document provides the field-by-field rules for translating GE PSLF EPC (power flow) and DYD (dynamics) records into the Raptrix PowerFlow Interchange (`.rpf` / RPF **v0.14.3**) Apache Arrow schema.
 
 **Fidelity policy**: numeric fields are written exactly as they appear in the source EPC file unless an explicit normalisation rule is documented below. No value clamping, substitution, or scaling is applied at parse time except where required to match the RPF schema units (e.g. MVA → per-unit on SBASE). Validation and singularity handling are the responsibility of the downstream solver.
 
@@ -19,7 +19,7 @@ This document provides the field-by-field rules for translating GE PSLF EPC (pow
 
 ## Version compatibility
 
-- **RPF contract**: **v0.14.1** emit (`raptrix-cim-arrow` 0.7.1); dual-read **v0.14.0** / **v0.13.1** / **v0.13.0**. Pre-0.13 `.rpf` files must be re-exported. Optional CLP columns are not authored on this path.
+- **RPF contract**: **v0.14.3** emit (`raptrix-cim-arrow` 0.7.3); dual-read **v0.14.2** / **v0.14.1** / **v0.14.0** / **v0.13.1** / **v0.13.0**. Pre-0.13 `.rpf` files must be re-exported. Optional CLP columns are not authored on this path. `shunt_control_mode` / `regulated_bus_id` are **null** — do not invent PSS/E MODSW from EPC SVD.
 - Trailing nullable **`is_secured` / `is_bes` / `is_bps` / `is_bptf`** on `branches`, `transformers_2w`, `transformers_3w`, and `multi_section_lines` are **null**. Do not invent BES from kV.
 - Equipment tables include nullable trailing **`mrid`** on new exports; `buses.latitude` / `buses.longitude` are null (no WGS84 in EPC).
 - Optional tables (`remedial_action_schemes`, `contingency_island_analysis`, `contingency_sequences`, `scenario_context`, computational load profiles) are not emitted on the standard PSLF export path. `contingencies` is a zero-row stub (`tpl_category` / `reserved` null).
@@ -181,6 +181,7 @@ Do **not** force PSSE/PSLF RPF row-count identity. These gaps are acceptable whe
 | large benchmark case solver-readiness | Not solver-ready (PSLF NR ~30pu stall) | Solver-ready (core v0.5.64) | PSLF format SVD baseline gap |
 | Texas2k_series25 | Solver-ready (0 v-violations, 110 Q-sw) | Solver-ready | parity dv≈0.077 (model semantic gap) |
 | Texas2k_series24 | Slack/type aligned with RAW; cold NR expected | Solver-ready | Prior auto-slack mismatch was export bug |
+| MemphisCase2026_Mar7 | Dual-format TAMU IBR-heavy synthetic (~993 buses) | Dual-format | Same stem in psse-rs `tests/data/external/` |
 | ACTIVSg10k/70k | Not converged (expected) | Not converged (expected) | IBR structural; LM+continuation also fails |
 | Eastern / Midwest24k | **Not in this corpus** (no EPC) | Available under psse-rs `tests/data/external/` | psse-rs ownership |
 

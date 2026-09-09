@@ -62,7 +62,7 @@ Runs basic structural checks on an `.epc` (parse success + required table presen
 
 ## Fidelity & Modern Grid Support
 
-- Emits the full set of **18** canonical required RPF **v0.14.1** root tables (zero-row where appropriate). Nullable `buses.latitude` / `buses.longitude` are always null (no WGS84 in EPC). Facility-membership flags on circuits and transformers are **null**. `contingencies` is a zero-row stub; `contingency_sequences` is omitted.
+- Emits the full set of **18** canonical required RPF **v0.14.3** root tables (zero-row where appropriate). Nullable `buses.latitude` / `buses.longitude` are always null (no WGS84 in EPC). Facility-membership flags on circuits and transformers are **null**. Switched-shunt control columns are **null** (do not invent PSS/E MODSW). `contingencies` is a zero-row stub; `contingency_sequences` is omitted.
 - IBR classification driven from `.dyd` model records (GENROU family + REPC_A / equivalent, matching psse-rs DYR logic where possible).
 - Deterministic `case_fingerprint`, `bus_uuid` generation, and slack selection.
 - Same sanitization and interchange-boundary rules as the PSS/E sibling.
@@ -72,7 +72,7 @@ See `docs/pslf-mapping.md` for the authoritative field-by-field translation rule
 
 ## Test Data (Important — licensed / confidential)
 
-The reference test cases live in `tests/networks/` (Texas synthetic grids + ACTIVSg used for cross-validation with psse-rs).
+The reference test cases live in `tests/networks/` (Texas synthetic grids, the Memphis TAMU IBR-heavy synthetic, and ACTIVSg used for cross-validation with psse-rs).
 
 **These files must never be committed to GitHub.** They are protected by a strict `.gitignore` and are only present on authorized developer machines.
 
@@ -156,7 +156,7 @@ Golden policy (parity with `raptrix-psse-rs`): canonical `tests/golden/<stem>.rp
 
 ## Versioning & Schema Contract
 
-This crate is pinned to **`raptrix-cim-arrow` 0.7.1** (git tag `v0.7.1`, RPF **v0.14.1**), matching `raptrix-psse-rs`. For a sibling `raptrix-cim-rs` checkout, use a **local** `[patch]` in `.cargo/config.toml` (not committed). Every emitted `.rpf` is validated against the locked contract before returning and carries synthesized **`mrid`** identifiers on equipment tables. Facility-membership flags are emitted null (do not invent BES from kV). Readers accept v0.14.1, v0.14.0, v0.13.1, and v0.13.0; pre-0.13 files must be re-exported; see [MIGRATION.md](MIGRATION.md).
+This crate is pinned to **`raptrix-cim-arrow` 0.7.3** (git tag `v0.7.3`, RPF **v0.14.3**), matching `raptrix-psse-rs`. For a sibling `raptrix-cim-rs` checkout, use a **local** `[patch]` in `.cargo/config.toml` (not committed). Every emitted `.rpf` is validated against the locked contract before returning and carries synthesized **`mrid`** identifiers on equipment tables. Facility-membership flags and switched-shunt control columns are emitted null (do not invent BES from kV or MODSW from EPC SVD). Readers accept v0.14.3 through v0.13.0; pre-0.13 files must be re-exported; see [MIGRATION.md](MIGRATION.md).
 
 See [raptrix-cim-rs schema-contract](https://github.com/RaptrixPowerFlow/raptrix-cim-rs/blob/main/docs/schema-contract.md) for the full RPF specification.
 

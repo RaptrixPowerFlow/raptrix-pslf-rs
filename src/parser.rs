@@ -10,7 +10,6 @@
 //! Designed to be robust against the real-world .EPC/.dyd files in tests/networks/.
 
 use std::fs;
-use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -20,12 +19,39 @@ use crate::models::{
     SwitchedShunt, Transformer2W, Zone,
 };
 
+/// Prefer UTF-8; fall back to Windows-1252 (PowerWorld title smart quotes).
+fn decode_vendor_text(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => s.to_owned(),
+        Err(_) => bytes.iter().copied().map(windows_1252_char).collect(),
+    }
+}
+
+fn windows_1252_char(b: u8) -> char {
+    const C1: [char; 32] = [
+        '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8D}', 'Ž',
+        '\u{8F}', '\u{90}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{9D}',
+        'ž', 'Ÿ',
+    ];
+    match b {
+        0x80..=0x9F => C1[(b - 0x80) as usize],
+        _ => char::from(b),
+    }
+}
+
+fn read_vendor_lines(path: &Path, kind: &str) -> Result<Vec<String>> {
+    let bytes = fs::read(path)
+        .with_context(|| format!("failed to open {kind} file: {}", path.display()))?;
+    let text = decode_vendor_text(&bytes);
+    Ok(text
+        .lines()
+        .map(|l| l.trim_end_matches('\r').to_string())
+        .collect())
+}
+
 /// Parse a GE PSLF .epc file.
 pub fn parse_epc(path: &Path) -> Result<Network> {
-    let file = fs::File::open(path)
-        .with_context(|| format!("failed to open EPC file: {}", path.display()))?;
-    let reader = BufReader::new(file);
-    let lines: Vec<String> = reader.lines().map(|l| l.unwrap_or_default()).collect();
+    let lines = read_vendor_lines(path, "EPC")?;
 
     let mut network = Network {
         title: "".into(),
@@ -881,12 +907,9 @@ fn tokenize_pslf_line(line: &str) -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 pub fn parse_dyd(path: &Path, network: &mut Network) -> Result<()> {
-    let file = fs::File::open(path)
-        .with_context(|| format!("failed to open DYD file: {}", path.display()))?;
-    let reader = BufReader::new(file);
+    let lines = read_vendor_lines(path, "DYD")?;
 
-    for line in reader.lines() {
-        let line = line.unwrap_or_default();
+    for line in lines {
         let trimmed = line.trim();
 
         if trimmed.is_empty() || trimmed.starts_with('#') {
