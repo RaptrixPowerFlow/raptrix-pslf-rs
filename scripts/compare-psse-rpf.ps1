@@ -1,12 +1,8 @@
-# Generate PSLF and PSS/E RPF files for matching Texas cases and compare summaries.
+# Compare local EPC decks with a same-stem RAW. Inputs are gitignored and are not named here.
 # Windows twin of compare-psse-rpf.sh with aligned export metadata flags.
 #
-# Adding a new dual-format case:
-#   1. Add EPC (+ optional DYD) under tests/networks/ and RAW (+ DYR) under
-#      raptrix-psse-rs/tests/data/external/ with the same stem.
-#   2. Append a stanza to the $Cases array below (and the shell script twin).
-#   3. Add the stem to DEFAULT_CASES in
-#      raptrix-core/python_tests/regression/pslf_psse_rpf_parity_harness.py.
+# A local EPC is compared when a same-stem RAW exists beside this checkout.
+# Companion dynamics files are optional and are discovered by stem.
 #
 # Usage:
 #   .\scripts\compare-psse-rpf.ps1
@@ -142,82 +138,39 @@ function Compare-Case {
 $NetworksDir = Join-Path $PslfRoot "tests\networks"
 $ExternalDir = Join-Path $PsseRoot "tests\data\external"
 
-$Cases = @(
-    @{
-        Name = "Texas7k_20210804"
-        Epc  = Join-Path $NetworksDir "Texas7k_20210804.EPC"
-        Dyd  = Join-Path $NetworksDir "Texas7k_20210804.dyd"
-        Raw  = Join-Path $ExternalDir "Texas7k_20210804.RAW"
-        Dyr  = Join-Path $ExternalDir "Texas7k_20210804.dyr"
-    },
-    @{
-        Name = "Texas2k_series25_case1_summerpeak"
-        Epc  = Join-Path $NetworksDir "Texas2k_series25_case1_summerpeak.EPC"
-        Dyd  = Join-Path $NetworksDir "Texas2k_series25_case1_summerpeak.dyd"
-        Raw  = Join-Path $ExternalDir "Texas2k_series25_case1_summerpeak.RAW"
-        Dyr  = Join-Path $ExternalDir "Texas2k_series25_case1_summerpeak.dyr"
-    },
-    @{
-        Name = "Texas2k_series24_case3_2024summerpeak"
-        Epc  = Join-Path $NetworksDir "Texas2k_series24_case3_2024summerpeak.EPC"
-        Dyd  = Join-Path $NetworksDir "Texas2k_series24_case3_2024summerpeak.dyd"
-        Raw  = Join-Path $ExternalDir "Texas2k_series24_case3_2024summerpeak.RAW"
-        Dyr  = Join-Path $ExternalDir "Texas2k_series24_case3_2024summerpeak.dyr"
-    },
-    @{
-        Name = "Texas2k_series24_case2_2016lowload"
-        Epc  = Join-Path $NetworksDir "Texas2k_series24_case2_2016lowload.EPC"
-        Dyd  = Join-Path $NetworksDir "Texas2k_series24_case2_2016lowload.dyd"
-        Raw  = Join-Path $ExternalDir "Texas2k_series24_case2_2016lowload.RAW"
-        Dyr  = Join-Path $ExternalDir "Texas2k_series24_case2_2016lowload.dyr"
-    },
-    @{
-        Name = "Texas2k_series24_case6_2024lowloadwithgfm"
-        Epc  = Join-Path $NetworksDir "Texas2k_series24_case6_2024lowloadwithgfm.EPC"
-        Dyd  = Join-Path $NetworksDir "Texas2k_series24_case6_2024lowloadwithgfm.dyd"
-        Raw  = Join-Path $ExternalDir "Texas2k_series24_case6_2024lowloadwithgfm.RAW"
-        Dyr  = Join-Path $ExternalDir "Texas2k_series24_case6_2024lowloadwithgfm.dyr"
-    },
-    @{
-        Name = "Texas2k_series24_case4_2024lowload"
-        Epc  = Join-Path $NetworksDir "Texas2k_series24_case4_2024lowload.EPC"
-        Dyd  = Join-Path $NetworksDir "Texas2k_series24_case4_2024lowload.dyd"
-        Raw  = Join-Path $ExternalDir "Texas2k_series24_case4_2024lowload.RAW"
-        Dyr  = Join-Path $ExternalDir "Texas2k_series24_case4_2024lowload.dyr"
-    },
-    @{
-        Name = "Texas2k_series24_case1_2016summerPeak"
-        Epc  = Join-Path $NetworksDir "Texas2k_series24_case1_2016summerPeak.EPC"
-        Dyd  = Join-Path $NetworksDir "Texas2k_series24_case1_2016summerPeak.dyd"
-        Raw  = Join-Path $ExternalDir "Texas2k_series24_case1_2016summerPeak.RAW"
-        Dyr  = Join-Path $ExternalDir "Texas2k_series24_case1_2016summerPeak.dyr"
-    },
-    @{
-        Name = "ACTIVSg10k"
-        Epc  = Join-Path $NetworksDir "ACTIVSg10k.EPC"
-        Dyd  = Join-Path $NetworksDir "ACTIVSg10k_dynamics.dyd"
-        Raw  = Join-Path $ExternalDir "ACTIVSg10k.RAW"
-        Dyr  = Join-Path $ExternalDir "ACTIVSg10k_dynamics.dyr"
-    },
-    @{
-        Name = "ACTIVSg70k"
-        Epc  = Join-Path $NetworksDir "ACTIVSg70k.EPC"
-        Dyd  = Join-Path $NetworksDir "ACTIVSg70k_dynamics.dyd"
-        Raw  = Join-Path $ExternalDir "ACTIVSg70k.RAW"
-        Dyr  = Join-Path $ExternalDir "ACTIVSg70k_dynamics.dyr"
-    },
-    @{
-        Name = "MemphisCase2026_Mar7"
-        Epc  = Join-Path $NetworksDir "MemphisCase2026_Mar7.EPC"
-        Dyd  = Join-Path $NetworksDir "MemphisCase2026_Mar7_Dynamics.dyd"
-        Raw  = Join-Path $ExternalDir "MemphisCase2026_Mar7.RAW"
-        Dyr  = Join-Path $ExternalDir "MemphisCase2026_Mar7_Dynamics.dyr"
-    }
-)
-
-foreach ($case in $Cases) {
-    Compare-Case @case
+function Find-Companion {
+    param([string]$Dir, [string]$Stem, [string[]]$Extensions)
+    if (-not (Test-Path $Dir)) { return $null }
+    $files = @(Get-ChildItem -Path $Dir -File -ErrorAction SilentlyContinue)
+    $exact = $files | Where-Object {
+        $_.BaseName -eq $Stem -and $Extensions -contains $_.Extension.TrimStart('.').ToLowerInvariant()
+    } | Select-Object -First 1
+    if ($exact) { return $exact.FullName }
+    $prefix = $files | Where-Object {
+        $_.BaseName.StartsWith("${Stem}_") -and $Extensions -contains $_.Extension.TrimStart('.').ToLowerInvariant()
+    } | Sort-Object { $_.Name.Length } | Select-Object -First 1
+    if ($prefix) { return $prefix.FullName }
+    return $null
 }
+
+$found = $false
+if (Test-Path $NetworksDir) {
+    $epcs = @(Get-ChildItem -Path $NetworksDir -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -match '^\.epc$' })
+    foreach ($epc in $epcs) {
+        $raw = Find-Companion $ExternalDir $epc.BaseName @("raw")
+        if (-not $raw) { continue }
+        $found = $true
+        Compare-Case -Name $epc.BaseName -Epc $epc.FullName `
+            -Dyd (Find-Companion $NetworksDir $epc.BaseName @("dyd")) `
+            -Raw $raw `
+            -Dyr (Find-Companion $ExternalDir $epc.BaseName @("dyr"))
+    }
+}
+if (-not $found) {
+    Write-Host "[skip] no local EPC with a same-stem RAW"
+}
+
 
 Write-Host ""
 Write-Host "Done. RPF files written to:" -ForegroundColor Green

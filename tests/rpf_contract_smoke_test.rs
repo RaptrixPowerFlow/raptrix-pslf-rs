@@ -5,9 +5,9 @@
 // If a copy of the MPL was not distributed with this file, You can obtain one at
 // https://mozilla.org/MPL/2.0/.
 
-//! Locked RPF interchange contract smoke tests (v0.14.3).
+//! Locked RPF interchange contract smoke tests (v0.14.4).
 
-use std::path::Path;
+use std::collections::HashMap;
 
 use anyhow::Result;
 use arrow::array::{
@@ -16,21 +16,45 @@ use arrow::array::{
 use arrow::datatypes::Int32Type;
 use raptrix_cim_arrow::{
     BUS_TYPE_PV, BUS_TYPE_SLACK, IDENTITY_MODEL_HYBRID_SOLVER_FLAT_V1, METADATA_KEY_CASE_MODE,
-    METADATA_KEY_DEFAULT_SHUNT_CONTROL_MODE, METADATA_KEY_IDENTITY_MODEL,
+    METADATA_KEY_COMPUTATIONAL_LOAD_MODE, METADATA_KEY_DEFAULT_SHUNT_CONTROL_MODE,
+    METADATA_KEY_FEATURE_DC_CONVERTERS, METADATA_KEY_IDENTITY_MODEL,
     METADATA_KEY_LOADS_ZIP_FIDELITY_PRESENCE, METADATA_KEY_MRID_SUPPORT, METADATA_KEY_RPF_VERSION,
     METADATA_KEY_SOLVED_STATE_PRESENCE, METADATA_KEY_TRANSFORMER_REPRESENTATION_MODE, RPF_VERSION,
-    TABLE_BRANCHES, TABLE_BUSES, TABLE_CONTINGENCIES, TABLE_CONTINGENCY_SEQUENCES,
-    TABLE_GENERATORS, TABLE_METADATA, TABLE_SWITCHED_SHUNTS, rpf_file_metadata, table_schema,
+    TABLE_BRANCHES, TABLE_BUSES, TABLE_COMPUTATIONAL_LOAD_PROFILES, TABLE_CONTINGENCIES,
+    TABLE_CONTINGENCY_SEQUENCES, TABLE_DC_CONVERTERS, TABLE_DC_LINES_2W, TABLE_GENERATORS,
+    TABLE_METADATA, TABLE_SWITCHED_SHUNTS, rpf_file_metadata, table_schema,
 };
+use raptrix_pslf_rs::export::build_branches_batch;
+use raptrix_pslf_rs::models::Branch;
 use raptrix_pslf_rs::{
     ExportOptions, RPF_VERSION as LIB_RPF_VERSION, write_pslf_to_rpf_with_options,
 };
 
-const EPC_PATH: &str = "tests/networks/Texas7k_20210804.EPC";
-const DYD_PATH: &str = "tests/networks/Texas7k_20210804.dyd";
+const SYNTHETIC_EPC: &str = "\
+title
+synthetic
+solution parameters
+sbase 100
+bus data
+1 SLACK 138 0 0 0 : 0 1.01 1.02 -5 1 1
+2 LOAD 138 0 0 0 : 1 1.00 1.00 0 1 1
+3 GEN 13.8 0 0 0 : 2 1.05 1.01 2 1 1
+load data
+2 LOAD 138 1 : 1 50 10
+generator data
+3 GEN 13.8 1 : 1 0 0 0 0 0 0 0 40 80 10 5 60 -10 100
+branch data
+1 A 138 2 B 138 1 : 1 0.01 0.20 0.05 100 110 120
+svd data
+2 SVD 138 0 0 1 : 1 1 0 0 0 0 0 0 0.40 0 0 0.02 /
+3 0.25 4 0.50 0 1 1
+end
+";
 
-fn file_exists(p: &str) -> bool {
-    Path::new(p).exists()
+fn write_synthetic_epc() -> tempfile::NamedTempFile {
+    let mut file = tempfile::NamedTempFile::with_suffix(".epc").expect("temp epc");
+    std::io::Write::write_all(&mut file, SYNTHETIC_EPC.as_bytes()).unwrap();
+    file
 }
 
 fn dict_utf8_at(col: &dyn Array, i: usize) -> &str {
@@ -51,9 +75,67 @@ fn dict_utf8_at(col: &dyn Array, i: usize) -> &str {
 fn crate_exports_rpf_version_constant() {
     assert_eq!(LIB_RPF_VERSION, RPF_VERSION);
     assert!(
-        matches!(RPF_VERSION, "v0.14.3"),
+        matches!(RPF_VERSION, "v0.14.4"),
         "unexpected RPF_VERSION {RPF_VERSION}"
     );
+}
+
+#[test]
+fn branch_batch_appends_null_end_shunts() {
+    let branch = Branch {
+        from_bus: 1,
+        to_bus: 2,
+        ckt: "1".into(),
+        r: 0.01,
+        x: 0.1,
+        b: 0.00609,
+        rate_a: 100.0,
+        rate_b: 110.0,
+        rate_c: 120.0,
+        status: 1,
+        ..Branch::default()
+    };
+    let mut nominal_kv = HashMap::new();
+    nominal_kv.insert(1, 138.0);
+    nominal_kv.insert(2, 138.0);
+
+    let batch = build_branches_batch(&[branch], &nominal_kv, 100.0).expect("branches batch");
+    assert_eq!(batch.num_columns(), 36);
+    assert_eq!(batch.schema().field(27).name(), "mrid");
+    assert_eq!(batch.schema().field(28).name(), "is_secured");
+    assert_eq!(batch.schema().field(31).name(), "is_bptf");
+    assert_eq!(batch.schema().field(32).name(), "g_from");
+    assert_eq!(batch.schema().field(33).name(), "b_from");
+    assert_eq!(batch.schema().field(34).name(), "g_to");
+    assert_eq!(batch.schema().field(35).name(), "b_to");
+
+    let b_shunt = batch
+        .column_by_name("b_shunt")
+        .expect("b_shunt")
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .expect("Float64");
+    assert!(
+        (b_shunt.value(0) - 0.00609).abs() < 1.0e-12,
+        "b_shunt stays total line charging"
+    );
+
+    for name in [
+        "is_secured",
+        "is_bes",
+        "is_bps",
+        "is_bptf",
+        "g_from",
+        "b_from",
+        "g_to",
+        "b_to",
+    ] {
+        let col = batch
+            .column_by_name(name)
+            .unwrap_or_else(|| panic!("{name}"));
+        assert!(col.is_null(0), "{name} must be null, not 0.0");
+        assert_eq!(col.null_count(), col.len());
+    }
 }
 
 #[test]
@@ -66,17 +148,15 @@ fn generators_schema_includes_trailing_mrid_column() {
 
 #[test]
 fn exported_rpf_carries_v0130_contract_metadata() -> Result<()> {
-    if !file_exists(EPC_PATH) {
-        eprintln!("[skip] licensed EPC not present");
-        return Ok(());
-    }
+    let epc = write_synthetic_epc();
+    let epc_path = epc.path().to_str().expect("utf-8 temp path");
 
     let tmp = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
     let out = tmp.to_string_lossy();
 
     write_pslf_to_rpf_with_options(
-        EPC_PATH,
-        Some(DYD_PATH),
+        epc_path,
+        None,
         &out,
         &ExportOptions {
             case_mode_override: Some("warm_start_planning".to_string()),
@@ -90,6 +170,16 @@ fn exported_rpf_carries_v0130_contract_metadata() -> Result<()> {
         root_meta.get(METADATA_KEY_RPF_VERSION).map(String::as_str),
         Some(RPF_VERSION),
         "root rpf_version must match locked contract"
+    );
+    assert_eq!(
+        root_meta.get(METADATA_KEY_RPF_VERSION).map(String::as_str),
+        Some("v0.14.4")
+    );
+    assert_eq!(
+        root_meta
+            .get(METADATA_KEY_FEATURE_DC_CONVERTERS)
+            .map(String::as_str),
+        Some("true")
     );
     assert_eq!(
         root_meta
@@ -225,12 +315,34 @@ fn exported_rpf_carries_v0130_contract_metadata() -> Result<()> {
         "at least one generator row must carry non-null mrid"
     );
 
+    let load_mode = metadata
+        .column_by_name(METADATA_KEY_COMPUTATIONAL_LOAD_MODE)
+        .expect("computational_load_mode");
+    assert_eq!(
+        load_mode.null_count(),
+        load_mode.len(),
+        "computational_load_mode stays null"
+    );
+
     let branches = tables.get(TABLE_BRANCHES).expect("branches table");
-    assert_eq!(branches.schema().fields().len(), 32);
+    assert_eq!(branches.schema().fields().len(), 36);
     assert_eq!(branches.schema().field(27).name(), "mrid");
     assert_eq!(branches.schema().field(28).name(), "is_secured");
     assert_eq!(branches.schema().field(31).name(), "is_bptf");
-    for name in ["is_secured", "is_bes", "is_bps", "is_bptf"] {
+    assert_eq!(branches.schema().field(32).name(), "g_from");
+    assert_eq!(branches.schema().field(33).name(), "b_from");
+    assert_eq!(branches.schema().field(34).name(), "g_to");
+    assert_eq!(branches.schema().field(35).name(), "b_to");
+    for name in [
+        "is_secured",
+        "is_bes",
+        "is_bps",
+        "is_bptf",
+        "g_from",
+        "b_from",
+        "g_to",
+        "b_to",
+    ] {
         let col = branches
             .column_by_name(name)
             .unwrap_or_else(|| panic!("{name}"));
@@ -274,6 +386,16 @@ fn exported_rpf_carries_v0130_contract_metadata() -> Result<()> {
         !tables.contains_key(TABLE_CONTINGENCY_SEQUENCES),
         "PSLF path must omit contingency_sequences"
     );
+    assert!(
+        !tables.contains_key(TABLE_COMPUTATIONAL_LOAD_PROFILES),
+        "PSLF path must omit computational_load_profiles"
+    );
+
+    let dc_lines = tables.get(TABLE_DC_LINES_2W).expect("dc_lines_2w");
+    assert_eq!(dc_lines.num_columns(), 15);
+    assert_eq!(dc_lines.num_rows(), 0);
+    let converters = tables.get(TABLE_DC_CONVERTERS).expect("dc_converters");
+    assert_eq!(converters.num_rows(), 0);
 
     Ok(())
 }

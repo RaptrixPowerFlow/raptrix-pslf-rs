@@ -5,9 +5,7 @@
 // If a copy of the MPL was not distributed with this file, You can obtain one at
 // https://mozilla.org/MPL/2.0/.
 
-//! Minimal structural validation for PSLF EPC files (opt-in via `validate` subcommand).
-//! Mirrors the design of psse-rs validation.rs (Severity + Report) but without
-//! MMWG-specific rules for v1.
+//! Structural validation for PSLF EPC files (`validate` subcommand).
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
@@ -63,7 +61,14 @@ impl ValidationReport {
     }
 }
 
-pub fn run_basic_checks(_network: &crate::models::Network) -> ValidationReport {
-    // Placeholder — real checks added after parser is functional.
-    ValidationReport::default()
+pub fn run_basic_checks(network: &crate::models::Network) -> ValidationReport {
+    let mut report = ValidationReport::default();
+    if network.buses.is_empty() {
+        report.issues.push(ValidationIssue {
+            severity: Severity::Error,
+            code: "EMPTY_BUSES".to_string(),
+            message: "EPC contains no bus records".to_string(),
+        });
+    }
+    report
 }

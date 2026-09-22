@@ -5,694 +5,260 @@
 // If a copy of the MPL was not distributed with this file, You can obtain one at
 // https://mozilla.org/MPL/2.0/.
 
-//! Basic smoke + cross-validation tests for the PSLF converter.
-//!
-//! These tests are designed to run on developer machines that have the
-//! licensed / confidential test networks locally. They will be skipped
-//! gracefully if the files are not present.
+//! Behavior tests on a synthetic EPC. Licensed decks are not named or required.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::io::Write;
 
 use anyhow::Result;
-use arrow::array::{
-    Array, BooleanArray, DictionaryArray, Float64Array, Int32Array, MapArray, StringArray,
-};
-use arrow::datatypes::Int32Type;
+use arrow::array::{Array, Float64Array, Int32Array, StringArray};
 use raptrix_cim_arrow::{
     BUS_TYPE_PQ, BUS_TYPE_PV, BUS_TYPE_SLACK, RPF_VERSION, TABLE_BUSES, TABLE_GENERATORS,
-    TABLE_LOADS, read_rpf_tables, rpf_file_metadata, summarize_rpf,
+    TABLE_SWITCHED_SHUNT_BANKS, TABLE_SWITCHED_SHUNTS, read_rpf_tables, rpf_file_metadata,
 };
+use raptrix_pslf_rs::{TransformerRepresentationMode, parser, validate_pslf_epc};
 
-const EPC_PATH: &str = "tests/networks/Texas7k_20210804.EPC";
-const DYD_PATH: &str = "tests/networks/Texas7k_20210804.dyd";
+const SYNTHETIC_EPC: &str = "\
+title
+synthetic
+solution parameters
+sbase 100
+bus data
+1 SLACK 138 0 0 0 : 0 1.01 1.02 -5 1 1
+2 LOAD 138 0 0 0 : 1 1.00 1.00 0 1 1
+3 GEN 13.8 0 0 0 : 2 1.05 1.01 2 1 1
+4 OFF 13.8 0 0 0 : 2 1.00 1.00 0 1 1
+load data
+2 LOAD 138 1 : 1 50 10
+generator data
+3 GEN 13.8 1 : 1 0 0 0 0 0 0 0 40 80 10 5 60 -10 100
+4 GEN 13.8 1 : 0 0 0 0 0 0 0 0 0 10 0 0 0 0 100
+branch data
+1 A 138 2 B 138 1 : 1 0.01 0.20 0.05 100 110 120
+svd data
+2 SVD 138 0 0 1 : 1 1 0 0 0 0 0 0 0.40 0 0 0.02 /
+3 0.25 2 -0.5 4 0.5 0 1 1
+5 SVD 138 0 0 1 : 0 1 0 0 0 0 0 0 0.80 0 0 0.02 /
+2 0.40 1 0.20 0 0
+transformer data
+1 A 138 2 B 138 1 : 1 0 0 0 0.0 0.01 0.1
+0 0 0
+0 0 0
+0 0 0
+end
+";
 
-fn file_exists(p: &str) -> bool {
-    Path::new(p).exists()
+fn write_epc(contents: &str) -> Result<tempfile::NamedTempFile> {
+    let mut file = tempfile::NamedTempFile::with_suffix(".epc")?;
+    file.write_all(contents.as_bytes())?;
+    file.flush()?;
+    Ok(file)
 }
 
 #[test]
-fn pslf_parser_and_writer_smoke() -> Result<()> {
-    if !file_exists(EPC_PATH) {
-        eprintln!("[test] Skipping PSLF smoke test — licensed EPC not present");
-        return Ok(());
-    }
+fn synthetic_epc_honors_type_impedance_and_svd_blocks() -> Result<()> {
+    let epc = write_epc(SYNTHETIC_EPC)?;
+    let path = epc.path().to_str().expect("utf-8 temp path");
+    let network = parser::parse_epc(std::path::Path::new(path))?;
 
-    let net = raptrix_pslf_rs::parser::parse_epc(Path::new(EPC_PATH))?;
-    assert_eq!(net.buses.len(), 6717, "bus count");
-    assert_eq!(net.generators.len(), 731, "generator count");
+    assert_eq!(network.sbase, 100.0);
+    let slack = network.buses.iter().find(|b| b.number == 1).unwrap();
+    assert_eq!(slack.ty, 0);
+    assert!((slack.volt - 1.02).abs() < 1e-9);
+    assert!((slack.vsched - 1.01).abs() < 1e-9);
 
-    let bus = net
-        .buses
-        .iter()
-        .find(|b| b.number == 110001)
-        .expect("bus 110001");
-    assert!(
-        (bus.volt - 1.037093).abs() < 0.001,
-        "bus 110001 volt: got {}",
-        bus.volt
-    );
-    assert!(
-        (bus.angle - (-4.242394)).abs() < 0.01,
-        "bus 110001 angle: got {}",
-        bus.angle
-    );
+    let branch = network.branches.iter().find(|b| b.from_bus == 1).unwrap();
+    assert!((branch.r - 0.01).abs() < 1e-12);
+    assert!((branch.x - 0.20).abs() < 1e-12);
+    assert!((branch.b - 0.05).abs() < 1e-12);
 
-    let generator = net
-        .generators
-        .iter()
-        .find(|g| g.bus == 111180)
-        .expect("gen 111180");
-    assert!(
-        generator.pg > 100.0,
-        "gen 111180 pg should be ~643 MW, got {}",
-        generator.pg
-    );
-    assert!(
-        (generator.qt - 379.710).abs() < 0.1,
-        "gen 111180 qt: got {}",
-        generator.qt
-    );
-    assert!(
-        (generator.qb - (-250.067)).abs() < 0.1,
-        "gen 111180 qb: got {}",
-        generator.qb
-    );
+    let active = network.switched_shunts.iter().find(|s| s.bus == 2).unwrap();
+    assert_eq!(active.bank_pairs, vec![(3, 0.25), (2, -0.5), (4, 0.5)]);
 
-    let tmp = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
-    let tmp_str = tmp.to_string_lossy();
+    let out = tempfile::NamedTempFile::with_suffix(".rpf")?;
+    let out_path = out.path().to_str().unwrap();
+    raptrix_pslf_rs::write_pslf_to_rpf(path, None, out_path)?;
 
-    raptrix_pslf_rs::write_pslf_to_rpf(EPC_PATH, Some(DYD_PATH), &tmp_str)?;
-
-    let metadata = rpf_file_metadata(&tmp)?;
-    let rpf_version = metadata
-        .get("rpf_version")
-        .map(|v| v.as_str())
-        .unwrap_or("");
+    let metadata = rpf_file_metadata(out.path())?;
     assert_eq!(
-        rpf_version, RPF_VERSION,
-        "rpf_version mismatch: expected {RPF_VERSION}, got {rpf_version}"
+        metadata.get("rpf_version").map(String::as_str),
+        Some("v0.14.4")
     );
+    assert_eq!(RPF_VERSION, "v0.14.4");
 
-    let summary = summarize_rpf(&tmp)?;
-    assert!(summary.total_rows > 0, "produced RPF should have rows");
-    assert_eq!(summary.table_rows(TABLE_BUSES), Some(6717), "RPF bus count");
-    assert_eq!(
-        summary.table_rows(TABLE_GENERATORS),
-        Some(731),
-        "RPF generator count"
-    );
-    assert_eq!(
-        summary.table_rows(TABLE_LOADS),
-        Some(5095),
-        "RPF load count"
-    );
-    assert!(summary.tables.iter().any(|t| t.table_name == TABLE_BUSES));
-
-    let tables: BTreeMap<_, _> = read_rpf_tables(&tmp)?.into_iter().collect();
-    let buses = tables
-        .get(TABLE_BUSES)
-        .expect("buses table in exported RPF");
-    let bus_id_col = buses
+    let tables: BTreeMap<_, _> = read_rpf_tables(out.path())?.into_iter().collect();
+    let buses = tables.get(TABLE_BUSES).unwrap();
+    let bus_id = buses
         .column_by_name("bus_id")
-        .expect("bus_id column")
+        .unwrap()
         .as_any()
         .downcast_ref::<Int32Array>()
-        .expect("bus_id Int32");
-    let v_mag_col = buses
+        .unwrap();
+    let bus_type = buses.column_by_name("type").unwrap();
+    let v_mag = buses
         .column_by_name("v_mag_set")
-        .expect("v_mag_set column")
+        .unwrap()
         .as_any()
         .downcast_ref::<Float64Array>()
-        .expect("v_mag_set Float64");
-    let bus_type_col = buses.column_by_name("type").expect("type column in buses");
-    let q_min_col = buses
-        .column_by_name("q_min")
-        .expect("q_min column")
-        .as_any()
-        .downcast_ref::<Float64Array>()
-        .expect("q_min Float64");
-    let q_max_col = buses
-        .column_by_name("q_max")
-        .expect("q_max column")
-        .as_any()
-        .downcast_ref::<Float64Array>()
-        .expect("q_max Float64");
-    let bus_idx = (0..bus_id_col.len())
-        .find(|&i| bus_id_col.value(i) == 111180)
-        .expect("bus 111180 in RPF");
-    let bus_111180 = net
-        .buses
-        .iter()
-        .find(|b| b.number == 111180)
-        .expect("bus 111180 in parsed EPC");
-    // v_mag_set is the operating-point seed and must preserve EPC bus.volt.
-    // bus.vsched is the AVR target and is carried separately in generator params["vs"].
-    assert!(
-        (v_mag_col.value(bus_idx) - bus_111180.volt).abs() < 1.0e-9,
-        "gen bus 111180 v_mag_set should preserve bus.volt ({:.6}), got {}",
-        bus_111180.volt,
-        v_mag_col.value(bus_idx)
-    );
-    assert!(
-        (bus_111180.vsched - 1.038548_f64).abs() < 0.0001,
-        "bus 111180 vsched from EPC: expected ~1.038548, got {}",
-        bus_111180.vsched
-    );
-    let bus_type_dict = bus_type_col
-        .as_any()
-        .downcast_ref::<DictionaryArray<Int32Type>>()
-        .expect("type Dictionary<Int32, Utf8>");
-    let bus_type_values = bus_type_dict
-        .values()
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .expect("dictionary values Utf8");
-    let bus_type_token = bus_type_values.value(bus_type_dict.key(bus_idx).expect("dictionary key"));
-    assert_eq!(
-        bus_type_token, BUS_TYPE_PV,
-        "gen bus 111180 must be exported as PV"
-    );
-    // sbase from EPC header — Texas7k uses 100
-    let base_mva = net.sbase;
-    let expected_qmin = generator.qb / base_mva;
-    let expected_qmax = generator.qt / base_mva;
-    assert!(
-        (q_min_col.value(bus_idx) - expected_qmin).abs() < 0.01,
-        "bus 111180 q_min pu: expected {:.6}, got {}",
-        expected_qmin,
-        q_min_col.value(bus_idx)
-    );
-    assert!(
-        (q_max_col.value(bus_idx) - expected_qmax).abs() < 0.01,
-        "bus 111180 q_max pu: expected {:.6}, got {}",
-        expected_qmax,
-        q_max_col.value(bus_idx)
-    );
+        .unwrap();
 
-    let gens = tables
-        .get(TABLE_GENERATORS)
-        .expect("generators table in exported RPF");
-    let gen_bus_col = gens
-        .column_by_name("bus_id")
-        .expect("bus_id column")
-        .as_any()
-        .downcast_ref::<Int32Array>()
-        .expect("bus_id Int32");
-    let gen_qmin_col = gens
-        .column_by_name("q_min_mvar")
-        .expect("q_min_mvar column")
-        .as_any()
-        .downcast_ref::<Float64Array>()
-        .expect("q_min_mvar Float64");
-    let gen_qmax_col = gens
-        .column_by_name("q_max_mvar")
-        .expect("q_max_mvar column")
-        .as_any()
-        .downcast_ref::<Float64Array>()
-        .expect("q_max_mvar Float64");
-    let gen_params = gens
-        .column_by_name("params")
-        .expect("params column")
-        .as_any()
-        .downcast_ref::<MapArray>()
-        .expect("params Map");
-    let gen_idx = (0..gen_bus_col.len())
-        .find(|&i| gen_bus_col.value(i) == 111180)
-        .expect("gen 111180 in RPF");
-    assert!(
-        (gen_qmin_col.value(gen_idx) - generator.qb).abs() < 0.1,
-        "gen 111180 q_min_mvar: got {}",
-        gen_qmin_col.value(gen_idx)
-    );
-    assert!(
-        (gen_qmax_col.value(gen_idx) - generator.qt).abs() < 0.1,
-        "gen 111180 q_max_mvar: got {}",
-        gen_qmax_col.value(gen_idx)
-    );
-    let offsets = gen_params.value_offsets();
-    let start = offsets[gen_idx] as usize;
-    let end = offsets[gen_idx + 1] as usize;
-    let param_keys = gen_params
-        .keys()
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .expect("params keys Utf8");
-    let param_values = gen_params
-        .values()
-        .as_any()
-        .downcast_ref::<Float64Array>()
-        .expect("params values Float64");
-    let vs_param = (start..end)
-        .find(|&i| param_keys.value(i) == "vs")
-        .map(|i| param_values.value(i))
-        .expect("generator params[vs]");
-    assert!(
-        (vs_param - bus_111180.vsched).abs() < 1.0e-9,
-        "generator params[vs] should preserve bus.vsched {}, got {vs_param}",
-        bus_111180.vsched
-    );
-
-    eprintln!(
-        "[test] PSLF smoke produced RPF with {} tables, {} rows",
-        summary.tables.len(),
-        summary.total_rows
-    );
-    Ok(())
-}
-
-#[test]
-fn pslf_vs_psse_cross_validation() -> Result<()> {
-    let epc = "tests/networks/Texas7k_20210804.EPC";
-    let raw = "../raptrix-psse-rs/tests/data/external/Texas7k_20210804.RAW";
-
-    if !file_exists(epc) || !file_exists(raw) {
-        eprintln!(
-            "[test] Skipping cross-validation — one or both licensed cases not present on this machine"
-        );
-        return Ok(());
+    let mut types = BTreeMap::new();
+    for i in 0..bus_id.len() {
+        let token = dict_utf8(bus_type.as_ref(), i);
+        types.insert(bus_id.value(i), (token.to_string(), v_mag.value(i)));
     }
+    assert_eq!(types.get(&1).unwrap().0, BUS_TYPE_SLACK);
+    assert!((types.get(&1).unwrap().1 - 1.02).abs() < 1e-9);
+    assert_eq!(types.get(&2).unwrap().0, BUS_TYPE_PQ);
+    assert_eq!(types.get(&3).unwrap().0, BUS_TYPE_PV);
+    assert_eq!(types.get(&4).unwrap().0, BUS_TYPE_PQ);
 
-    let pslf_out = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
-    let _psse_out = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
-
-    raptrix_pslf_rs::write_pslf_to_rpf(
-        epc,
-        Some("tests/networks/Texas7k_20210804.dyd"),
-        &pslf_out.to_string_lossy(),
-    )?;
-
-    let pslf_sum = summarize_rpf(&pslf_out)?;
-
-    eprintln!(
-        "[cross-val] PSLF produced {} buses, {} generators",
-        pslf_sum.table_rows(TABLE_BUSES).unwrap_or(0),
-        pslf_sum.table_rows(TABLE_GENERATORS).unwrap_or(0)
-    );
-
-    assert!(pslf_sum.table_rows(TABLE_BUSES).unwrap_or(0) > 0);
-    assert!(pslf_sum.table_rows(TABLE_GENERATORS).unwrap_or(0) > 0);
-
-    Ok(())
-}
-
-#[test]
-fn transformer_ps_impedance_from_epc_header() -> Result<()> {
-    if !file_exists(EPC_PATH) {
-        eprintln!("[test] Skipping transformer parse test — licensed EPC not present");
-        return Ok(());
-    }
-
-    let net = raptrix_pslf_rs::parser::parse_epc(Path::new(EPC_PATH))?;
-    let xfmr = net
-        .transformers
-        .iter()
-        .find(|t| t.from_bus == 110001 && t.to_bus == 110004)
-        .expect("transformer 110001-110004");
-    assert!((xfmr.r - 1.440e-3).abs() < 1.0e-6, "ps_r: got {}", xfmr.r);
-    assert!((xfmr.x - 4.775e-2).abs() < 1.0e-5, "ps_x: got {}", xfmr.x);
-    assert!(
-        (xfmr.rate_a - 245.7).abs() < 0.1,
-        "rate_a: got {}",
-        xfmr.rate_a
-    );
-
-    let xfmr_345 = net
-        .transformers
-        .iter()
-        .find(|t| t.from_bus == 110127 && t.to_bus == 110126 && t.ckt.as_ref() == "1")
-        .expect("transformer 110127-110126 ckt 1");
-    assert!(
-        (xfmr_345.tap - 1.0).abs() < 1.0e-6,
-        "tap should be WINDV (1.0), not kV: got {}",
-        xfmr_345.tap
-    );
-    assert!(
-        (xfmr_345.to_kv - 345.0).abs() < 0.1,
-        "to_kv: got {}",
-        xfmr_345.to_kv
-    );
-    Ok(())
-}
-
-/// Branch R/X/B must be system-base pu (not ohms via Zbase). Twin psse golden for
-/// (1001,1064) has x≈0.0358; the old physical export wrote ≈4.73455 (=0.0358×115²/100).
-#[test]
-fn series24_case1_branch_impedance_is_system_pu() -> Result<()> {
-    let epc = "tests/networks/Texas2k_series24_case1_2016summerPeak.EPC";
-    if !file_exists(epc) {
-        eprintln!("[test] Skipping branch pu test — licensed EPC not present");
-        return Ok(());
-    }
-
-    let net = raptrix_pslf_rs::parser::parse_epc(Path::new(epc))?;
-    let branch = net
-        .branches
-        .iter()
-        .find(|b| b.from_bus == 1001 && b.to_bus == 1064 && b.ckt.as_ref().trim() == "1")
-        .expect("branch 1001-1064 ckt 1 in EPC");
-    assert!(
-        (branch.x - 0.0358).abs() < 1.0e-6,
-        "parsed EPC x should be system pu 0.0358, got {}",
-        branch.x
-    );
-
-    let tmp = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
-    raptrix_pslf_rs::write_pslf_to_rpf(epc, None, &tmp.to_string_lossy())?;
-    let tables: BTreeMap<_, _> = read_rpf_tables(&tmp)?.into_iter().collect();
-    let branches = tables
-        .get(raptrix_cim_arrow::TABLE_BRANCHES)
-        .expect("branches");
-    let from = branches
-        .column_by_name("from_bus_id")
-        .expect("from_bus_id")
-        .as_any()
-        .downcast_ref::<Int32Array>()
-        .expect("Int32");
-    let to = branches
-        .column_by_name("to_bus_id")
-        .expect("to_bus_id")
-        .as_any()
-        .downcast_ref::<Int32Array>()
-        .expect("Int32");
-    let r = branches
-        .column_by_name("r")
-        .expect("r")
-        .as_any()
-        .downcast_ref::<Float64Array>()
-        .expect("Float64");
-    let x = branches
-        .column_by_name("x")
-        .expect("x")
-        .as_any()
-        .downcast_ref::<Float64Array>()
-        .expect("Float64");
-    let b = branches
+    let branches = tables.get("branches").unwrap();
+    let b_shunt = branches
         .column_by_name("b_shunt")
-        .expect("b_shunt")
+        .unwrap()
         .as_any()
         .downcast_ref::<Float64Array>()
-        .expect("Float64");
-
-    let idx = (0..from.len())
-        .find(|&i| from.value(i) == 1001 && to.value(i) == 1064)
-        .expect("exported branch 1001-1064");
-    assert!(
-        (x.value(idx) - 0.0358).abs() < 1.0e-6,
-        "exported x must be system pu 0.0358, got {} (ohm-scaled would be ~4.73)",
-        x.value(idx)
-    );
-    assert!(
-        (r.value(idx) - 0.00524).abs() < 1.0e-6,
-        "exported r must be system pu 0.00524, got {}",
-        r.value(idx)
-    );
-    assert!(
-        (b.value(idx) - 0.00609).abs() < 1.0e-6,
-        "exported b_shunt must be system pu 0.00609, got {}",
-        b.value(idx)
-    );
-    Ok(())
-}
-
-#[test]
-fn series25_switched_shunt_row_count_matches_psse() -> Result<()> {
-    let epc = "tests/networks/Texas2k_series25_case1_summerpeak.EPC";
-    if !file_exists(epc) {
-        eprintln!("[test] Skipping SVD count test — licensed EPC not present");
-        return Ok(());
+        .unwrap();
+    assert!((b_shunt.value(0) - 0.05).abs() < 1e-12);
+    for name in ["g_from", "b_from", "g_to", "b_to"] {
+        let col = branches.column_by_name(name).unwrap();
+        assert_eq!(col.null_count(), col.len());
     }
 
-    let net = raptrix_pslf_rs::parser::parse_epc(Path::new(epc))?;
-    assert_eq!(
-        net.switched_shunts.len(),
-        202,
-        "parsed switched_shunts count (expect one EPC record per device, matching PSSE RAW)"
-    );
-
-    let tmp = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
-    raptrix_pslf_rs::write_pslf_to_rpf(epc, None, &tmp.to_string_lossy())?;
-    let summary = summarize_rpf(&tmp)?;
-    assert_eq!(
-        summary.table_rows(raptrix_cim_arrow::TABLE_SWITCHED_SHUNTS),
-        Some(202),
-        "exported switched_shunts row count"
-    );
-    Ok(())
-}
-
-#[test]
-fn series24_case4_svd_count_matches_epc() -> Result<()> {
-    let epc = "tests/networks/Texas2k_series24_case4_2024lowload.EPC";
-    if !file_exists(epc) {
-        eprintln!("[test] Skipping series24 SVD count test — licensed EPC not present");
-        return Ok(());
-    }
-
-    let net = raptrix_pslf_rs::parser::parse_epc(Path::new(epc))?;
-    assert_eq!(
-        net.switched_shunts.len(),
-        157,
-        "parsed switched_shunts count (157 EPC records; PSSE RAW may export 153)"
-    );
-
-    let tmp = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
-    raptrix_pslf_rs::write_pslf_to_rpf(epc, None, &tmp.to_string_lossy())?;
-    let summary = summarize_rpf(&tmp)?;
-    assert_eq!(
-        summary.table_rows(raptrix_cim_arrow::TABLE_SWITCHED_SHUNTS),
-        Some(157),
-        "exported switched_shunts row count"
-    );
-    Ok(())
-}
-
-#[test]
-fn series24_inactive_svd_exports_zero_operating_state() -> Result<()> {
-    let epc = "tests/networks/Texas2k_series24_case4_2024lowload.EPC";
-    if !file_exists(epc) {
-        eprintln!("[test] Skipping inactive SVD test — licensed EPC not present");
-        return Ok(());
-    }
-
-    let net = raptrix_pslf_rs::parser::parse_epc(Path::new(epc))?;
-    for (bus, expected_source_binit) in [(3051, 0.8), (8005, 1.0)] {
-        let shunt = net
-            .switched_shunts
-            .iter()
-            .find(|s| s.bus == bus && s.status == 0)
-            .unwrap_or_else(|| panic!("offline SVD at bus {bus}"));
-        assert!(
-            (shunt.b_init - expected_source_binit).abs() < 1.0e-9,
-            "source EPC b_init retained by parser at bus {bus}"
-        );
-    }
-
-    let tmp = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
-    raptrix_pslf_rs::write_pslf_to_rpf(epc, None, &tmp.to_string_lossy())?;
-    let tables: BTreeMap<_, _> = read_rpf_tables(&tmp)?.into_iter().collect();
-    let shunts = tables
-        .get(raptrix_cim_arrow::TABLE_SWITCHED_SHUNTS)
-        .expect("switched_shunts");
-    let bus_id = shunts
+    let gens = tables.get(TABLE_GENERATORS).unwrap();
+    let gen_bus = gens
         .column_by_name("bus_id")
-        .expect("bus_id")
+        .unwrap()
         .as_any()
         .downcast_ref::<Int32Array>()
-        .expect("Int32");
-    let status = shunts
-        .column_by_name("status")
-        .expect("status")
+        .unwrap();
+    let q_min = gens
+        .column_by_name("q_min_mvar")
+        .unwrap()
         .as_any()
-        .downcast_ref::<BooleanArray>()
-        .expect("Boolean");
-    let current_step = shunts
-        .column_by_name("current_step")
-        .expect("current_step")
+        .downcast_ref::<Float64Array>()
+        .unwrap();
+    let q_max = gens
+        .column_by_name("q_max_mvar")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .unwrap();
+    let online = (0..gen_bus.len()).find(|&i| gen_bus.value(i) == 3).unwrap();
+    assert!((q_min.value(online) - (-10.0)).abs() < 1e-9);
+    assert!((q_max.value(online) - 60.0).abs() < 1e-9);
+
+    let shunts = tables.get(TABLE_SWITCHED_SHUNTS).unwrap();
+    let shunt_bus = shunts
+        .column_by_name("bus_id")
+        .unwrap()
         .as_any()
         .downcast_ref::<Int32Array>()
-        .expect("Int32");
+        .unwrap();
     let b_init = shunts
         .column_by_name("b_init_pu")
-        .expect("b_init_pu")
+        .unwrap()
         .as_any()
         .downcast_ref::<Float64Array>()
-        .expect("Float64");
+        .unwrap();
+    let inactive = (0..shunt_bus.len())
+        .find(|&i| shunt_bus.value(i) == 5)
+        .unwrap();
+    assert!(b_init.value(inactive).abs() < 1e-12);
 
-    for bus in [3051, 8005] {
-        let idx = (0..bus_id.len())
-            .find(|&i| bus_id.value(i) == bus && !status.value(i))
-            .unwrap_or_else(|| panic!("exported offline SVD at bus {bus}"));
-        assert_eq!(
-            current_step.value(idx),
-            0,
-            "inactive SVD current_step at bus {bus}"
-        );
-        assert_eq!(
-            b_init.value(idx),
-            0.0,
-            "inactive SVD b_init_pu at bus {bus}"
-        );
-    }
+    let banks = tables.get(TABLE_SWITCHED_SHUNT_BANKS).unwrap();
+    let bank_b = banks
+        .column_by_name("b_mvar")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .unwrap();
+    let positive_steps = (0..bank_b.len()).filter(|&i| bank_b.value(i) > 0.0).count();
+    assert_eq!(positive_steps, 3 + 4 + 2 + 1);
+    assert!((0..bank_b.len()).all(|i| bank_b.value(i) > 0.0));
+
+    let t3 = tables.get("transformers_3w").unwrap();
+    assert_eq!(t3.num_rows(), 0);
 
     Ok(())
 }
 
-fn dict_utf8_at(col: &dyn Array, i: usize) -> &str {
+#[test]
+fn transformer_mode_does_not_change_electrical_rows() -> Result<()> {
+    let epc = write_epc(SYNTHETIC_EPC)?;
+    let path = epc.path().to_str().unwrap();
+    let native = tempfile::NamedTempFile::with_suffix(".rpf")?;
+    let expanded = tempfile::NamedTempFile::with_suffix(".rpf")?;
+    raptrix_pslf_rs::write_pslf_to_rpf_with_options(
+        path,
+        None,
+        native.path().to_str().unwrap(),
+        &raptrix_pslf_rs::ExportOptions {
+            transformer_representation_mode: TransformerRepresentationMode::Native3W,
+            ..Default::default()
+        },
+    )?;
+    raptrix_pslf_rs::write_pslf_to_rpf_with_options(
+        path,
+        None,
+        expanded.path().to_str().unwrap(),
+        &raptrix_pslf_rs::ExportOptions {
+            transformer_representation_mode: TransformerRepresentationMode::Expanded,
+            ..Default::default()
+        },
+    )?;
+    let native_meta = rpf_file_metadata(native.path())?;
+    let expanded_meta = rpf_file_metadata(expanded.path())?;
+    assert_eq!(
+        native_meta
+            .get("rpf.transformer_representation_mode")
+            .map(String::as_str),
+        Some("native_3w")
+    );
+    assert_eq!(
+        expanded_meta
+            .get("rpf.transformer_representation_mode")
+            .map(String::as_str),
+        Some("expanded")
+    );
+    for path in [native.path(), expanded.path()] {
+        let tables: BTreeMap<_, _> = read_rpf_tables(path)?.into_iter().collect();
+        assert_eq!(tables.get("transformers_3w").unwrap().num_rows(), 0);
+        assert!(tables.get("transformers_2w").unwrap().num_rows() > 0);
+    }
+    Ok(())
+}
+
+#[test]
+fn validate_rejects_an_epc_with_no_buses() -> Result<()> {
+    let empty = write_epc("title\nsynthetic\nsolution parameters\nsbase 100\nend\n")?;
+    let report = validate_pslf_epc(empty.path().to_str().unwrap())?;
+    assert!(!report.is_clean());
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "EMPTY_BUSES")
+    );
+
+    let ok = write_epc(SYNTHETIC_EPC)?;
+    let report = validate_pslf_epc(ok.path().to_str().unwrap())?;
+    assert!(report.is_clean());
+    Ok(())
+}
+
+fn dict_utf8(col: &dyn Array, i: usize) -> &str {
+    use arrow::array::DictionaryArray;
+    use arrow::datatypes::Int32Type;
     let dict = col
         .as_any()
         .downcast_ref::<DictionaryArray<Int32Type>>()
-        .expect("expected Dictionary<Int32, Utf8>");
-    assert!(!dict.is_null(i), "dictionary entry {i} must be non-null");
+        .expect("dictionary");
     let values = dict
         .values()
         .as_any()
         .downcast_ref::<StringArray>()
-        .expect("dictionary values must be Utf8");
-    values.value(dict.key(i).expect("dictionary key"))
-}
-
-/// Texas2k series24 case1/case2: explicit Slack=7389 and RAW-aligned PV/PQ histograms.
-/// Twin RAW IDE counts: PQ=1609, PV=390, Slack=1 (bus 7389).
-#[test]
-fn series24_case1_bus_types_match_raw_ide() -> Result<()> {
-    let epc = "tests/networks/Texas2k_series24_case1_2016summerPeak.EPC";
-    let dyd = "tests/networks/Texas2k_series24_case1_2016summerPeak.dyd";
-    if !file_exists(epc) {
-        eprintln!("[test] Skipping series24 type histogram — licensed EPC not present");
-        return Ok(());
-    }
-
-    let net = raptrix_pslf_rs::parser::parse_epc(Path::new(epc))?;
-    let swing = net
-        .buses
-        .iter()
-        .find(|b| b.ty == 0)
-        .expect("EPC must contain exactly one ty=0 swing bus");
-    assert_eq!(swing.number, 7389, "series24 case1 swing bus");
-
-    let tmp = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
-    raptrix_pslf_rs::write_pslf_to_rpf(epc, Some(dyd), &tmp.to_string_lossy())?;
-
-    let tables: BTreeMap<_, _> = read_rpf_tables(&tmp)?.into_iter().collect();
-    let buses = tables.get(TABLE_BUSES).expect("buses");
-    let bus_id = buses
-        .column_by_name("bus_id")
-        .expect("bus_id")
-        .as_any()
-        .downcast_ref::<Int32Array>()
-        .expect("Int32");
-    let bus_type = buses.column_by_name("type").expect("type");
-
-    let mut pq = 0usize;
-    let mut pv = 0usize;
-    let mut slack = 0usize;
-    let mut slack_ids = Vec::new();
-    for i in 0..bus_type.len() {
-        match dict_utf8_at(bus_type.as_ref(), i) {
-            t if t == BUS_TYPE_PQ => pq += 1,
-            t if t == BUS_TYPE_PV => pv += 1,
-            t if t == BUS_TYPE_SLACK => {
-                slack += 1;
-                slack_ids.push(bus_id.value(i));
-            }
-            other => panic!("unexpected bus type token {other}"),
-        }
-    }
-
-    assert_eq!(slack, 1, "exactly one Slack bus");
-    assert_eq!(slack_ids, vec![7389], "Slack must be bus 7389 (RAW IDE=3)");
-    assert_eq!(pv, 390, "PV count must match twin RAW IDE=2");
-    assert_eq!(pq, 1609, "PQ count must match twin RAW IDE=1");
-    assert_eq!(pq + pv + slack, 2000);
-
-    Ok(())
-}
-
-#[test]
-fn series24_case2_bus_types_match_raw_ide() -> Result<()> {
-    let epc = "tests/networks/Texas2k_series24_case2_2016lowload.EPC";
-    if !file_exists(epc) {
-        eprintln!("[test] Skipping series24 case2 type histogram — licensed EPC not present");
-        return Ok(());
-    }
-
-    let tmp = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
-    raptrix_pslf_rs::write_pslf_to_rpf(epc, None, &tmp.to_string_lossy())?;
-
-    let tables: BTreeMap<_, _> = read_rpf_tables(&tmp)?.into_iter().collect();
-    let buses = tables.get(TABLE_BUSES).expect("buses");
-    let bus_id = buses
-        .column_by_name("bus_id")
-        .expect("bus_id")
-        .as_any()
-        .downcast_ref::<Int32Array>()
-        .expect("Int32");
-    let bus_type = buses.column_by_name("type").expect("type");
-
-    let mut pq = 0usize;
-    let mut pv = 0usize;
-    let mut slack = 0usize;
-    let mut slack_ids = Vec::new();
-    for i in 0..bus_type.len() {
-        match dict_utf8_at(bus_type.as_ref(), i) {
-            t if t == BUS_TYPE_PQ => pq += 1,
-            t if t == BUS_TYPE_PV => pv += 1,
-            t if t == BUS_TYPE_SLACK => {
-                slack += 1;
-                slack_ids.push(bus_id.value(i));
-            }
-            other => panic!("unexpected bus type token {other}"),
-        }
-    }
-
-    // Twin RAW (lowload): IDE 1=1803, 2=196, 3=1 @ 7389 — fewer online plants than case1.
-    assert_eq!(slack_ids, vec![7389]);
-    assert_eq!(
-        pv, 196,
-        "case2 PV must match RAW (not inflated offline plants)"
-    );
-    assert_eq!(pq, 1803);
-    assert_eq!(slack, 1);
-    Ok(())
-}
-
-/// case3 summerpeak: twin RAW IDE 1=1464, 2=535, 3=1 @ 7389.
-#[test]
-fn series24_case3_bus_types_match_raw_ide() -> Result<()> {
-    let epc = "tests/networks/Texas2k_series24_case3_2024summerpeak.EPC";
-    if !file_exists(epc) {
-        eprintln!("[test] Skipping series24 case3 type histogram — licensed EPC not present");
-        return Ok(());
-    }
-
-    let tmp = tempfile::NamedTempFile::new()?.path().with_extension("rpf");
-    raptrix_pslf_rs::write_pslf_to_rpf(epc, None, &tmp.to_string_lossy())?;
-
-    let tables: BTreeMap<_, _> = read_rpf_tables(&tmp)?.into_iter().collect();
-    let buses = tables.get(TABLE_BUSES).expect("buses");
-    let bus_id = buses
-        .column_by_name("bus_id")
-        .expect("bus_id")
-        .as_any()
-        .downcast_ref::<Int32Array>()
-        .expect("Int32");
-    let bus_type = buses.column_by_name("type").expect("type");
-
-    let mut pq = 0usize;
-    let mut pv = 0usize;
-    let mut slack_ids = Vec::new();
-    for i in 0..bus_type.len() {
-        match dict_utf8_at(bus_type.as_ref(), i) {
-            t if t == BUS_TYPE_PQ => pq += 1,
-            t if t == BUS_TYPE_PV => pv += 1,
-            t if t == BUS_TYPE_SLACK => slack_ids.push(bus_id.value(i)),
-            other => panic!("unexpected bus type token {other}"),
-        }
-    }
-
-    assert_eq!(slack_ids, vec![7389]);
-    assert_eq!(pv, 535);
-    assert_eq!(pq, 1464);
-    Ok(())
+        .unwrap();
+    values.value(dict.key(i).unwrap())
 }

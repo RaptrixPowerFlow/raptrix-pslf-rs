@@ -18,6 +18,7 @@ max_bytes=$((10 * 1024 * 1024))
 pattern='BEGIN RSA PRIVATE KEY|BEGIN PRIVATE KEY|BEGIN DSA PRIVATE KEY|AWS_SECRET_ACCESS_KEY|AWS_ACCESS_KEY_ID|AKIA[0-9A-Z]{16}|password=|api_key|API_KEY|token=|-----BEGIN OPENSSH PRIVATE KEY-----'
 # Partner / vendor product names stay out of this public converter.
 partner_pattern='SAInt|encoord|VAREFDEF'
+case_path='tests/networks/[A-Za-z0-9_][^[:space:]\"$*) ]*\.(epc|EPC|dyd|DYD)|tests/data/external/[A-Za-z0-9_][^[:space:]\"$*) ]*\.(raw|RAW|dyr|DYR)'
 
 is_content_scan_allowlisted() {
   case "$1" in
@@ -84,6 +85,11 @@ for file in "${files[@]}"; do
       git show ":$file" 2>/dev/null | grep -I -n -E "$pattern" | sed -n '1,5p'
       bad=1
     fi
+    if ! is_content_scan_allowlisted "$file" && git show ":$file" 2>/dev/null | grep -I -n -E --quiet "$case_path"; then
+      echo "[public-safety] licensed case path in staged file: $file"
+      git show ":$file" 2>/dev/null | grep -I -n -E "$case_path" | sed -n '1,5p'
+      bad=1
+    fi
     if ! is_content_scan_allowlisted "$file" && git show ":$file" 2>/dev/null | grep -I -n -E -i --quiet "$partner_pattern"; then
       echo "[public-safety] partner-specific name in staged file: $file"
       git show ":$file" 2>/dev/null | grep -I -n -E -i "$partner_pattern" | sed -n '1,5p'
@@ -93,6 +99,11 @@ for file in "${files[@]}"; do
     if ! is_content_scan_allowlisted "$file" && [[ -f "$file" ]] && grep -I -n -E --quiet "$pattern" "$file"; then
       echo "[public-safety] potential secret in tracked file: $file"
       grep -I -n -E "$pattern" "$file" | sed -n '1,5p'
+      bad=1
+    fi
+    if ! is_content_scan_allowlisted "$file" && [[ -f "$file" ]] && grep -I -n -E --quiet "$case_path" "$file"; then
+      echo "[public-safety] licensed case path in tracked file: $file"
+      grep -I -n -E "$case_path" "$file" | sed -n '1,5p'
       bad=1
     fi
     if ! is_content_scan_allowlisted "$file" && [[ -f "$file" ]] && grep -I -n -E -i --quiet "$partner_pattern" "$file"; then

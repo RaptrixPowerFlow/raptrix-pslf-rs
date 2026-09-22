@@ -21,7 +21,7 @@ struct Args {
     left: PathBuf,
     /// Right-hand (e.g. PSSE-derived) RPF path
     right: PathBuf,
-    /// Bus ID for buses/generators/loads spot-check (default: 110001 loads/buses, 111180 generators)
+    /// Bus id for an optional buses/generators/loads spot-check. Omitted means row counts only.
     #[arg(long)]
     bus_id: Option<i32>,
 }
@@ -105,8 +105,9 @@ fn compare_key_fields(left: &Path, right: &Path, bus_id: Option<i32>) -> Result<
     let left_by_name: BTreeMap<_, _> = left_tables.into_iter().collect();
     let right_by_name: BTreeMap<_, _> = right_tables.into_iter().collect();
 
-    let bus_spot = bus_id.unwrap_or(110001);
-    let gen_spot = bus_id.unwrap_or(111180);
+    let Some(bus_spot) = bus_id else {
+        return Ok(());
+    };
 
     for table in [
         TABLE_BUSES,
@@ -128,7 +129,7 @@ fn compare_key_fields(left: &Path, right: &Path, bus_id: Option<i32>) -> Result<
         println!("--- {table} field spot-check ---");
         match table {
             TABLE_BUSES => spot_check_bus(lb, rb, bus_spot)?,
-            TABLE_GENERATORS => spot_check_generators(lb, rb, gen_spot)?,
+            TABLE_GENERATORS => spot_check_generators(lb, rb, bus_spot)?,
             TABLE_LOADS => spot_check_loads(lb, rb, bus_spot)?,
             _ => {
                 println!("  (row counts only for {table})");

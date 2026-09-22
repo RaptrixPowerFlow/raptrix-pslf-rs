@@ -1,5 +1,32 @@
 # Migration — raptrix-pslf-rs
 
+## v0.7.4 / RPF v0.14.4 (converter table and branch-end shunts)
+
+`raptrix-pslf-rs` **0.7.4** emits RPF **v0.14.4**.
+
+### What changed
+
+- Writer stamps `v0.14.4`. The linked reader accepts only **`v0.14.4`** and **`0.14.4`**.
+  v0.14.3 and every older stamp are rejected. Re-export cached `.rpf` files.
+  **`v0.15.0`** is reserved and is not stamped.
+- `dc_lines_2w` stays 15 columns and is still emitted empty. `p_setpoint_mw` is rectifier DC power.
+- `dc_converters` is always emitted, including zero rows. It is not one of the 18 canonical tables.
+  Root metadata stamps `raptrix.features.dc_converters=true`. Omitting the table fails validation.
+- `branches` is 36 columns. `g_from`, `b_from`, `g_to`, and `b_to` are null on this path.
+  `b_shunt` stays total line charging.
+- `computational_load_profiles` stays omitted. `computational_load_mode` stays null.
+- Switched-shunt control columns and facility-membership flags stay null.
+- **Dependency**: `raptrix-cim-arrow` **0.7.4** / git tag **`v0.7.4`**, Arrow **59.3**.
+
+### Consumer checklist
+
+1. Accept `raptrix.version` ∈ {`v0.14.4`, `0.14.4`} only.
+2. Reject `v0.14.3` and every older stamp. There is no dual-read and no padding of an old stamp.
+3. Require `dc_converters` (zero rows is valid) and `raptrix.features.dc_converters=true`.
+4. Read `branches` at width 36. A null end-shunt column means the source has no per-end fields.
+5. Keep `computational_load_profiles` optional and absent on this export path.
+6. Leave `v0.15.0` unused.
+
 ## v0.7.3 / RPF v0.14.3 (additive switched-shunt control pad)
 
 `raptrix-pslf-rs` **0.7.3** emits RPF **v0.14.3**.

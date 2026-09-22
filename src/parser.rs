@@ -5,9 +5,8 @@
 // If a copy of the MPL was not distributed with this file, You can obtain one at
 // https://mozilla.org/MPL/2.0/.
 
-//! GE PSLF .epc (power flow) and .dyd (dynamics) parser.
-//! Pragmatic line-based section parser with quote-aware tokenization.
-//! Designed to be robust against the real-world .EPC/.dyd files in tests/networks/.
+//! GE PSLF `.epc` (power flow) and `.dyd` (dynamics) parser.
+//! Line-based section parser with quote-aware tokenization.
 
 use std::fs;
 use std::path::Path;
@@ -19,7 +18,7 @@ use crate::models::{
     SwitchedShunt, Transformer2W, Zone,
 };
 
-/// Prefer UTF-8; fall back to Windows-1252 (PowerWorld title smart quotes).
+/// Prefer UTF-8; fall back to Windows-1252 for title bytes such as `0x93` / `0x94`.
 fn decode_vendor_text(bytes: &[u8]) -> String {
     match std::str::from_utf8(bytes) {
         Ok(s) => s.to_owned(),
@@ -274,8 +273,6 @@ fn parse_bus_data(lines: &[String], mut start: usize, buses: &mut Vec<Bus>) -> R
 }
 
 fn parse_one_bus_line(line: &str) -> Option<Bus> {
-    // Typical line after header:
-    //   110001 "EDNA 1 1    " 138.0000 " "  0  :  1 1.037093  1.037093  -4.242394    7    1 ...
     let tokens = tokenize_pslf_line(line);
     if tokens.len() < 4 {
         return None;
@@ -396,8 +393,6 @@ fn parse_generator_data(
 
 fn merge_generator_continuation(generator: &mut Generator, line: &str) {
     let tokens = tokenize_pslf_line(line);
-    // Continuation token 4 is often VS=1.0 (PSLF placeholder). raptrix-core Texas cases
-    // still need this applied at export for Newton convergence — see docs/pslf-mapping.md.
     if generator.vs <= 0.0
         && let Some(vs) = tokens.get(4).and_then(|s| s.parse::<f64>().ok())
         && vs > 0.0
@@ -734,20 +729,34 @@ fn parse_one_svd_header(line: &str) -> Option<SwitchedShunt> {
     })
 }
 
+fn is_step_count_token(token: &str) -> bool {
+    !token.contains(['.', 'e', 'E']) && token.parse::<u32>().is_ok()
+}
+
+fn is_susceptance_token(token: &str) -> bool {
+    token.parse::<f64>().is_ok() && token.contains(['.', 'e', 'E'])
+}
+
+/// Leading `(N, B)` pairs. `N` is an integer step count. `B` is per-step susceptance
+/// and carries a decimal point. The integer tail after those pairs is not banks.
 fn parse_svd_continuation(line: &str, shunt: &mut SwitchedShunt) {
-    let nums: Vec<f64> = line
-        .split_whitespace()
-        .filter_map(|s| s.parse().ok())
-        .collect();
-    if nums.len() >= 2 {
-        let n_steps = nums[0].round().max(0.0) as u32;
-        let b_mvar = nums[1];
-        if n_steps > 0 && b_mvar.abs() > 1.0e-12 {
-            shunt.bank_pairs.push((n_steps, b_mvar));
+    let tokens: Vec<&str> = line.split_whitespace().collect();
+    let mut index = 0;
+    while index + 1 < tokens.len() {
+        let n_tok = tokens[index];
+        let b_tok = tokens[index + 1];
+        if !is_step_count_token(n_tok) || !is_susceptance_token(b_tok) {
+            break;
+        }
+        let n_steps = n_tok.parse::<u32>().unwrap_or(0);
+        let b_pu = b_tok.parse::<f64>().unwrap_or(0.0);
+        if n_steps > 0 && b_pu.is_finite() {
+            shunt.bank_pairs.push((n_steps, b_pu));
             for _ in 0..n_steps {
-                shunt.steps.push(b_mvar);
+                shunt.steps.push(b_pu);
             }
         }
+        index += 2;
     }
 }
 
@@ -837,8 +846,7 @@ fn parse_one_transformer_line(
         .and_then(|s| s.parse().ok())
         .unwrap_or(1);
 
-    // PSLF 2-winding primary record: from_bus, to_bus on first line.
-    // 3-winding detection deferred — emit as 2W for v1 unless tertiary bus appears later.
+    // Tertiary windings are not modeled. The header is stored as a two-winding record.
     let r = tokens
         .get(colon_pos + 5)
         .and_then(|s| s.parse().ok())
@@ -1011,4 +1019,24 @@ fn extract_dyd_generators(models: &[DydModelData]) -> Vec<DydGeneratorData> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn svd_continuation_keeps_every_leading_pair() {
+        let mut shunt = SwitchedShunt::default();
+        parse_svd_continuation("3 0.25 2 -0.5 4 0.5 0 1 1", &mut shunt);
+        assert_eq!(shunt.bank_pairs, vec![(3, 0.25), (2, -0.5), (4, 0.5)]);
+        assert_eq!(shunt.steps.len(), 3 + 2 + 4);
+    }
+
+    #[test]
+    fn svd_continuation_stops_before_integer_tail() {
+        let mut shunt = SwitchedShunt::default();
+        parse_svd_continuation("2 0.5 1 1 0", &mut shunt);
+        assert_eq!(shunt.bank_pairs, vec![(2, 0.5)]);
+    }
 }

@@ -65,8 +65,13 @@ pub fn derive_switched_shunt_banks(network: &mut Network) {
     network.switched_shunt_banks.clear();
     for (shunt_row_idx, shunt) in network.switched_shunts.iter().enumerate() {
         let shunt_id = (shunt_row_idx + 1) as i32;
-        for (bank_idx, (n_steps, b_pu)) in shunt.bank_pairs.iter().enumerate() {
-            let bank_id = (bank_idx + 1) as i32;
+        let mut emitted_banks = 0u32;
+        for (n_steps, b_pu) in &shunt.bank_pairs {
+            if *b_pu <= 0.0 {
+                continue;
+            }
+            emitted_banks += 1;
+            let bank_id = emitted_banks as i32;
             for step in 1..=(*n_steps as i32) {
                 network.switched_shunt_banks.push(SwitchedShuntBankRow {
                     shunt_id,
@@ -1055,6 +1060,12 @@ pub fn build_branches_batch(
             new_null_array(&arrow::datatypes::DataType::Boolean, branches.len()),
             new_null_array(&arrow::datatypes::DataType::Boolean, branches.len()),
             new_null_array(&arrow::datatypes::DataType::Boolean, branches.len()),
+            // v0.14.4: g_from, b_from, g_to, b_to. EPC has R, X, and B only.
+            // Null means no per-end fields. b_shunt stays total line charging.
+            new_null_array(&arrow::datatypes::DataType::Float64, branches.len()),
+            new_null_array(&arrow::datatypes::DataType::Float64, branches.len()),
+            new_null_array(&arrow::datatypes::DataType::Float64, branches.len()),
+            new_null_array(&arrow::datatypes::DataType::Float64, branches.len()),
         ],
     )
     .context("building branches batch")
@@ -1229,7 +1240,7 @@ pub fn build_transformers_3w_batch(
         tap_h.append_value(if t.tap_h > 0.0 { t.tap_h } else { 1.0 });
         tap_m.append_value(if t.tap_m > 0.0 { t.tap_m } else { 1.0 });
         tap_l.append_value(if t.tap_l > 0.0 { t.tap_l } else { 1.0 });
-        phase_shift.append_value(t.phase_shift_deg.to_radians());
+        phase_shift.append_value(t.phase_shift_deg);
         vector_group.append_value("unknown");
         rate_a.append_value(t.rate_h / base_mva);
         rate_b.append_value(t.rate_m / base_mva);

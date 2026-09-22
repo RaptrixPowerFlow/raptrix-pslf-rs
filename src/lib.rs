@@ -6,7 +6,7 @@
 // https://mozilla.org/MPL/2.0/.
 
 //! `raptrix-pslf-rs` — High-performance GE PSLF (`.epc` + `.dyd`) →
-//! Raptrix PowerFlow Interchange v0.14.3 converter.
+//! Raptrix PowerFlow Interchange v0.14.4 converter.
 
 pub mod export;
 pub mod models;
@@ -22,11 +22,11 @@ use raptrix_cim_arrow::{
     IDENTITY_MODEL_HYBRID_SOLVER_FLAT_V1, METADATA_KEY_CASE_FINGERPRINT, METADATA_KEY_CASE_MODE,
     METADATA_KEY_DEFAULT_SHUNT_CONTROL_MODE, METADATA_KEY_IDENTITY_MODEL,
     METADATA_KEY_SOLVED_STATE_PRESENCE, METADATA_KEY_VALIDATION_MODE, RootWriteOptions,
-    TABLE_AREAS, TABLE_BRANCHES, TABLE_BUSES, TABLE_CONTINGENCIES, TABLE_DC_LINES_2W,
-    TABLE_DYNAMICS_MODELS, TABLE_FIXED_SHUNTS, TABLE_GENERATORS, TABLE_INTERFACES, TABLE_LOADS,
-    TABLE_METADATA, TABLE_MULTI_SECTION_LINES, TABLE_OWNERS, TABLE_SWITCHED_SHUNT_BANKS,
-    TABLE_SWITCHED_SHUNTS, TABLE_TRANSFORMERS_2W, TABLE_TRANSFORMERS_3W, TABLE_ZONES,
-    write_root_rpf_with_metadata,
+    TABLE_AREAS, TABLE_BRANCHES, TABLE_BUSES, TABLE_CONTINGENCIES, TABLE_DC_CONVERTERS,
+    TABLE_DC_LINES_2W, TABLE_DYNAMICS_MODELS, TABLE_FIXED_SHUNTS, TABLE_GENERATORS,
+    TABLE_INTERFACES, TABLE_LOADS, TABLE_METADATA, TABLE_MULTI_SECTION_LINES, TABLE_OWNERS,
+    TABLE_SWITCHED_SHUNT_BANKS, TABLE_SWITCHED_SHUNTS, TABLE_TRANSFORMERS_2W,
+    TABLE_TRANSFORMERS_3W, TABLE_ZONES, empty_dc_converters_batch, write_root_rpf_with_metadata,
 };
 
 pub use raptrix_cim_arrow::{
@@ -209,6 +209,7 @@ pub fn write_pslf_to_rpf_with_options(
         export::empty_table(TABLE_MULTI_SECTION_LINES)?,
     );
     table_batches.insert(TABLE_DC_LINES_2W, export::empty_table(TABLE_DC_LINES_2W)?);
+    table_batches.insert(TABLE_DC_CONVERTERS, empty_dc_converters_batch());
     table_batches.insert(
         TABLE_CONTINGENCIES,
         export::empty_table(TABLE_CONTINGENCIES)?,
@@ -359,8 +360,7 @@ pub(crate) fn resolved_default_shunt_control_mode(
 }
 
 pub fn validate_pslf_epc(epc_path: &str) -> Result<validation::ValidationReport> {
-    let _ = parser::parse_epc(std::path::Path::new(epc_path))
+    let network = parser::parse_epc(std::path::Path::new(epc_path))
         .with_context(|| format!("failed to parse EPC for validation: {epc_path}"))?;
-
-    Ok(validation::ValidationReport::default())
+    Ok(validation::run_basic_checks(&network))
 }

@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-09-22
+
+### RPF v0.14.4 (raptrix-cim-arrow 0.7.4) — converter table and branch-end shunts
+
+- Pin `raptrix-cim-arrow` to git tag `v0.7.4` and `arrow` **59.3**.
+- Writer stamps `v0.14.4`. The linked reader accepts only `v0.14.4` and `0.14.4`.
+  v0.14.3 and every older stamp are rejected. Re-export cached `.rpf` files.
+  `v0.15.0` is reserved and is not used.
+- `dc_lines_2w` stays 15 columns and stays the empty table this exporter writes.
+  `p_setpoint_mw` is rectifier DC power.
+- Always emit `dc_converters`, including zero rows. It is not one of the 18
+  canonical tables. Stamp `raptrix.features.dc_converters=true`.
+  `RootWriteOptions.include_dc_converters` stays at its default `true`.
+  The internal multi-terminal stub is not written as rows. Two-terminal DC
+  sections are not ingested.
+- `branches` is 36 columns. Trailing `g_from`, `b_from`, `g_to`, and `b_to`
+  are null. `b_shunt` stays total line charging. Bus shunt aggregation is unchanged.
+- `computational_load_profiles` stays omitted. `computational_load_mode` stays null.
+  `perc1_params` is unchanged.
+- Switched-shunt control columns stay null. Facility-membership flags stay null.
+
 ## [0.7.3] - 2026-09-09
 
 ### RPF v0.14.3 (raptrix-cim-arrow 0.7.3) — switched-shunt control pad
@@ -21,16 +42,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Golden corpus
 
-- Added **MemphisCase2026_Mar7** (~993-bus TAMU IBR-heavy synthetic) to the
-  local `tests/networks/` golden sweep (`.EPC` + `_Dynamics.dyd`). Canonical
-  `tests/golden/` output is dynamic when the DYD is present. Dual-format
-  compare scripts (`compare-psse-rpf.sh` / `.ps1`) include the matching
-  PSS/E stem.
+- Local licensed decks under `tests/networks/` participate in the golden sweep
+  when present. Canonical `tests/golden/` output is dynamic when a DYD companion
+  is present.
 
 ### Fixed
 
-- **Windows-1252 EPC/DYD titles**: PowerWorld smart quotes (`0x93`/`0x94`) in
-  citation lines are decoded instead of dropping the line.
+- **Windows-1252 EPC/DYD titles**: bytes `0x93` / `0x94` in title lines are
+  decoded instead of dropping the line.
 - Trailing nullable transformer columns added by later RPF minors (tap
   control on v0.14.2) are padded null so local sibling `raptrix-cim-arrow`
   patches still export.
@@ -59,16 +78,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Readers accept v0.14.0, v0.13.1, and v0.13.0. Pre-0.13 still requires re-export.
 - Dependency: git tag `v0.7.0`.
 
-### Bus type fidelity (Texas2k series24 / RAW IDE parity)
+### Bus type fidelity
 
-- Map PSLF `ty=0` → explicit `Slack` (e.g. bus **7389** on series24); never leave zero Slack for core auto-pick.
-- Demote offline plant buses (`ty=2` without an online machine) to `PQ` so PV histograms match twin RAW IDE.
-- Document branch OOS row retention vs core native RAW drop; larger RAW-only cases remain psse-rs-only (no EPC).
+- Map PSLF `ty=0` to explicit `Slack`. Do not leave a case with zero slack buses for a downstream auto-pick.
+- Demote offline plant buses (`ty=2` without an in-service machine) to `PQ`.
+- Keep out-of-service branch rows (`status=false`).
 - Canonical local corpus remains `tests/golden/` (not stale `tests/compare/`).
 
 ### Branch / transformer impedance (system pu)
 
-- Stop writing branch/transformer `r`/`x`/`b` as physical ohms via \(Z_\mathrm{base}\). Emit **system-base pu** like `raptrix-psse-rs` (fixes series24 non-convergence from ~132.25× reactance inflation).
+- Stop writing branch/transformer `r`/`x`/`b` as physical ohms via \(Z_\mathrm{base}\). Emit **system-base pu**.
 - `transformers_2w.phase_shift` exported in **degrees** per the RPF field guide (was incorrectly converted to radians).
 
 ### Operating-state replay
@@ -141,5 +160,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] — Initial scaffold
 
 - Project scaffold mirroring `raptrix-psse-rs` architecture.
-- EPC + DYD parser and canonical RPF export for Texas reference cases.
+- EPC + DYD parser and canonical RPF export.
 - Cross-tool row-count parity tests with `raptrix-psse-rs` where cases overlap.

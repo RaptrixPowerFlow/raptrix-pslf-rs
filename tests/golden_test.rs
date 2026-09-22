@@ -22,8 +22,10 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use raptrix_cim_arrow::{
-    RPF_VERSION, TABLE_BRANCHES, TABLE_BUSES, TABLE_DYNAMICS_MODELS, TABLE_GENERATORS, TABLE_LOADS,
-    TABLE_MULTI_SECTION_LINES, TABLE_TRANSFORMERS_2W, TABLE_TRANSFORMERS_3W,
+    METADATA_KEY_FEATURE_DC_CONVERTERS, RPF_VERSION, TABLE_BRANCHES, TABLE_BUSES,
+    TABLE_COMPUTATIONAL_LOAD_PROFILES, TABLE_DC_CONVERTERS, TABLE_DC_LINES_2W,
+    TABLE_DYNAMICS_MODELS, TABLE_GENERATORS, TABLE_LOADS, TABLE_MULTI_SECTION_LINES,
+    TABLE_TRANSFORMERS_2W, TABLE_TRANSFORMERS_3W,
 };
 
 const NETWORKS_DIR: &str = "tests/networks";
@@ -35,6 +37,62 @@ const MEMBERSHIP_TABLES: &[&str] = &[
     TABLE_TRANSFORMERS_3W,
     TABLE_MULTI_SECTION_LINES,
 ];
+
+fn assert_v0144_export_shape(path: &str) {
+    let metadata = raptrix_cim_arrow::rpf_file_metadata(path).expect("rpf metadata");
+    assert_eq!(
+        metadata.get("rpf_version").map(String::as_str),
+        Some("v0.14.4"),
+        "{path} stamp"
+    );
+    assert_eq!(
+        metadata
+            .get(METADATA_KEY_FEATURE_DC_CONVERTERS)
+            .map(String::as_str),
+        Some("true"),
+        "{path} dc_converters feature flag"
+    );
+
+    let tables = raptrix_cim_arrow::read_rpf_tables(path).expect("read golden rpf");
+    let dc_lines = tables
+        .iter()
+        .find(|(n, _)| n == TABLE_DC_LINES_2W)
+        .map(|(_, b)| b)
+        .unwrap_or_else(|| panic!("{path} missing dc_lines_2w"));
+    assert_eq!(dc_lines.num_columns(), 15, "{path} dc_lines_2w width");
+    assert_eq!(dc_lines.num_rows(), 0, "{path} dc_lines_2w rows");
+
+    let converters = tables
+        .iter()
+        .find(|(n, _)| n == TABLE_DC_CONVERTERS)
+        .map(|(_, b)| b)
+        .unwrap_or_else(|| panic!("{path} missing dc_converters"));
+    assert_eq!(converters.num_rows(), 0, "{path} dc_converters rows");
+
+    assert!(
+        tables
+            .iter()
+            .all(|(n, _)| n != TABLE_COMPUTATIONAL_LOAD_PROFILES),
+        "{path} must omit computational_load_profiles"
+    );
+
+    let branches = tables
+        .iter()
+        .find(|(n, _)| n == TABLE_BRANCHES)
+        .map(|(_, b)| b)
+        .unwrap_or_else(|| panic!("{path} missing branches"));
+    assert_eq!(branches.num_columns(), 36, "{path} branches width");
+    for name in ["g_from", "b_from", "g_to", "b_to"] {
+        let col = branches
+            .column_by_name(name)
+            .unwrap_or_else(|| panic!("{path} branches missing {name}"));
+        assert_eq!(
+            col.null_count(),
+            col.len(),
+            "{path} branches.{name} must be all-null"
+        );
+    }
+}
 
 fn assert_membership_flags_all_null(path: &str) {
     let tables = raptrix_cim_arrow::read_rpf_tables(path).expect("read golden rpf");
@@ -148,7 +206,6 @@ fn find_dynamic_companion(epc: &Path, dynamic_files: &[PathBuf]) -> Option<PathB
         return Some(found.clone());
     }
 
-    // Prefer the shortest suffix variant, e.g. "ACTIVSg10k_dynamics" over longer alternates.
     prefix_matches
         .into_iter()
         .min_by_key(|p| p.file_name().and_then(|n| n.to_str()).unwrap_or("").len())
@@ -250,7 +307,7 @@ fn run_case(
 #[test]
 fn golden_build_all_network_epc_cases() {
     assert!(
-        matches!(RPF_VERSION, "v0.14.3"),
+        matches!(RPF_VERSION, "v0.14.4"),
         "unexpected RPF_VERSION {RPF_VERSION}"
     );
 
@@ -387,35 +444,12 @@ fn golden_build_all_network_epc_cases() {
 
     for t in &timings {
         assert_membership_flags_all_null(&t.output_file);
-    }
-
-    // Legacy short-stem aliases still referenced by older core/scripts paths.
-    let golden = Path::new(GOLDEN_DIR);
-    let aliases = [
-        (
-            "Texas2k_series25_case1_summerpeak.rpf",
-            "Texas2k_series25.rpf",
-        ),
-        (
-            "Texas2k_series25_case1_summerpeak_dynamic.rpf",
-            "Texas2k_series25_dynamic.rpf",
-        ),
-        (
-            "Texas2k_series25_case1_summerpeak_static.rpf",
-            "Texas2k_series25_static.rpf",
-        ),
-        (
-            "Texas2k_series24_case6_2024lowloadwithgfm_dynamic.rpf",
-            "Texas2k_series24_gfm_dynamic.rpf",
-        ),
-    ];
-    for (src_name, dst_name) in aliases {
-        let src = golden.join(src_name);
-        let dst = golden.join(dst_name);
-        if src.exists() {
-            fs::copy(&src, &dst).unwrap_or_else(|e| {
-                panic!("failed to write alias {} -> {}: {e}", src_name, dst_name)
-            });
+        assert_v0144_export_shape(&t.output_file);
+        let static_alias = Path::new(GOLDEN_DIR).join(format!("{}_static.rpf", t.case_name));
+        assert_v0144_export_shape(&static_alias.to_string_lossy());
+        if t.dynamics_file.is_some() {
+            let dyn_alias = Path::new(GOLDEN_DIR).join(format!("{}_dynamic.rpf", t.case_name));
+            assert_v0144_export_shape(&dyn_alias.to_string_lossy());
         }
     }
 }

@@ -1,12 +1,6 @@
 #!/usr/bin/env bash
-# Generate PSLF and PSS/E RPF files for matching Texas cases and compare summaries.
-#
-# Adding a new dual-format case:
-#   1. Add EPC (+ optional DYD) under tests/networks/ and RAW (+ DYR) under
-#      ../raptrix-psse-rs/tests/data/external/ with the same stem.
-#   2. Append a compare_case stanza below (and the PowerShell script twin).
-#   3. Add the stem to DEFAULT_CASES in
-#      ../raptrix-core/python_tests/regression/pslf_psse_rpf_parity_harness.py.
+# Compare local EPC decks with a same-stem RAW under the sibling converter checkout.
+# Inputs are gitignored. This script does not name them.
 set -euo pipefail
 
 SKIP_BUILD=0
@@ -81,65 +75,65 @@ compare_case() {
   "$COMPARE_BIN" "$pslf_out" "$psse_out" || true
 }
 
-compare_case "Texas7k_20210804" \
-  "$PSLF/tests/networks/Texas7k_20210804.EPC" \
-  "$PSLF/tests/networks/Texas7k_20210804.dyd" \
-  "$PSSE/tests/data/external/Texas7k_20210804.RAW" \
-  "$PSSE/tests/data/external/Texas7k_20210804.dyr"
-
-compare_case "Texas2k_series25_case1_summerpeak" \
-  "$PSLF/tests/networks/Texas2k_series25_case1_summerpeak.EPC" \
-  "$PSLF/tests/networks/Texas2k_series25_case1_summerpeak.dyd" \
-  "$PSSE/tests/data/external/Texas2k_series25_case1_summerpeak.RAW" \
-  "$PSSE/tests/data/external/Texas2k_series25_case1_summerpeak.dyr"
-
-compare_case "Texas2k_series24_case3_2024summerpeak" \
-  "$PSLF/tests/networks/Texas2k_series24_case3_2024summerpeak.EPC" \
-  "$PSLF/tests/networks/Texas2k_series24_case3_2024summerpeak.dyd" \
-  "$PSSE/tests/data/external/Texas2k_series24_case3_2024summerpeak.RAW" \
-  "$PSSE/tests/data/external/Texas2k_series24_case3_2024summerpeak.dyr"
-
-compare_case "Texas2k_series24_case2_2016lowload" \
-  "$PSLF/tests/networks/Texas2k_series24_case2_2016lowload.EPC" \
-  "$PSLF/tests/networks/Texas2k_series24_case2_2016lowload.dyd" \
-  "$PSSE/tests/data/external/Texas2k_series24_case2_2016lowload.RAW" \
-  "$PSSE/tests/data/external/Texas2k_series24_case2_2016lowload.dyr"
-
-compare_case "Texas2k_series24_case6_2024lowloadwithgfm" \
-  "$PSLF/tests/networks/Texas2k_series24_case6_2024lowloadwithgfm.EPC" \
-  "$PSLF/tests/networks/Texas2k_series24_case6_2024lowloadwithgfm.dyd" \
-  "$PSSE/tests/data/external/Texas2k_series24_case6_2024lowloadwithgfm.RAW" \
-  "$PSSE/tests/data/external/Texas2k_series24_case6_2024lowloadwithgfm.dyr"
-
-compare_case "Texas2k_series24_case4_2024lowload" \
-  "$PSLF/tests/networks/Texas2k_series24_case4_2024lowload.EPC" \
-  "$PSLF/tests/networks/Texas2k_series24_case4_2024lowload.dyd" \
-  "$PSSE/tests/data/external/Texas2k_series24_case4_2024lowload.RAW" \
-  "$PSSE/tests/data/external/Texas2k_series24_case4_2024lowload.dyr"
-
-compare_case "Texas2k_series24_case1_2016summerPeak" \
-  "$PSLF/tests/networks/Texas2k_series24_case1_2016summerPeak.EPC" \
-  "$PSLF/tests/networks/Texas2k_series24_case1_2016summerPeak.dyd" \
-  "$PSSE/tests/data/external/Texas2k_series24_case1_2016summerPeak.RAW" \
-  "$PSSE/tests/data/external/Texas2k_series24_case1_2016summerPeak.dyr"
-
-compare_case "ACTIVSg10k" \
-  "$PSLF/tests/networks/ACTIVSg10k.EPC" \
-  "$PSLF/tests/networks/ACTIVSg10k_dynamics.dyd" \
-  "$PSSE/tests/data/external/ACTIVSg10k.RAW" \
-  "$PSSE/tests/data/external/ACTIVSg10k_dynamics.dyr"
-
-compare_case "ACTIVSg70k" \
-  "$PSLF/tests/networks/ACTIVSg70k.EPC" \
-  "$PSLF/tests/networks/ACTIVSg70k_dynamics.dyd" \
-  "$PSSE/tests/data/external/ACTIVSg70k.RAW" \
-  "$PSSE/tests/data/external/ACTIVSg70k_dynamics.dyr"
-
-compare_case "MemphisCase2026_Mar7" \
-  "$PSLF/tests/networks/MemphisCase2026_Mar7.EPC" \
-  "$PSLF/tests/networks/MemphisCase2026_Mar7_Dynamics.dyd" \
-  "$PSSE/tests/data/external/MemphisCase2026_Mar7.RAW" \
-  "$PSSE/tests/data/external/MemphisCase2026_Mar7_Dynamics.dyr"
+shopt -s nullglob
+found=0
+declare -A seen_stems=()
+for epc in "$PSLF/tests/networks/"*.epc "$PSLF/tests/networks/"*.EPC; do
+  [[ -f "$epc" ]] || continue
+  stem="$(basename "$epc")"
+  stem="${stem%.*}"
+  if [[ -n "${seen_stems[$stem]:-}" ]]; then
+    continue
+  fi
+  seen_stems[$stem]=1
+  raw=""
+  for cand in "$PSSE/tests/data/external/${stem}.RAW" "$PSSE/tests/data/external/${stem}.raw"; do
+    if [[ -f "$cand" ]]; then
+      raw="$cand"
+      break
+    fi
+  done
+  [[ -n "$raw" ]] || continue
+  dyd=""
+  for cand in "$PSLF/tests/networks/${stem}.dyd" "$PSLF/tests/networks/${stem}.DYD"; do
+    if [[ -f "$cand" ]]; then
+      dyd="$cand"
+      break
+    fi
+  done
+  if [[ -z "$dyd" ]]; then
+    shortest=""
+    for cand in "$PSLF/tests/networks/${stem}_"*.dyd "$PSLF/tests/networks/${stem}_"*.DYD; do
+      [[ -f "$cand" ]] || continue
+      if [[ -z "$shortest" || ${#cand} -lt ${#shortest} ]]; then
+        shortest="$cand"
+      fi
+    done
+    dyd="$shortest"
+  fi
+  dyr=""
+  for cand in "$PSSE/tests/data/external/${stem}.dyr" "$PSSE/tests/data/external/${stem}.DYR"; do
+    if [[ -f "$cand" ]]; then
+      dyr="$cand"
+      break
+    fi
+  done
+  if [[ -z "$dyr" ]]; then
+    shortest=""
+    for cand in "$PSSE/tests/data/external/${stem}_"*.dyr "$PSSE/tests/data/external/${stem}_"*.DYR; do
+      [[ -f "$cand" ]] || continue
+      if [[ -z "$shortest" || ${#cand} -lt ${#shortest} ]]; then
+        shortest="$cand"
+      fi
+    done
+    dyr="$shortest"
+  fi
+  found=1
+  compare_case "$stem" "$epc" "$dyd" "$raw" "$dyr"
+done
+if [[ "$found" -eq 0 ]]; then
+  echo "[skip] no local EPC with a same-stem RAW"
+fi
 
 echo ""
 echo "Done. RPF files written to:"

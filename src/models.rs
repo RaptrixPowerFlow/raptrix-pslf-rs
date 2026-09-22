@@ -6,8 +6,7 @@
 // https://mozilla.org/MPL/2.0/.
 
 //! PSLF data model (EPC + DYD records).
-//! Field names kept close to GE PSLF documentation for fidelity and future C++ porting.
-//! This is the direct analogue of raptrix-psse-rs/src/models.rs.
+//! Field names follow the EPC record layout.
 
 use std::fmt;
 

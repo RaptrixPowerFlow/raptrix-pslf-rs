@@ -9,7 +9,7 @@
 
 # raptrix-pslf-rs
 
-GE PSLF (`.epc` + `.dyd`) to Raptrix PowerFlow Interchange (`.rpf`) conversion — built for **large cases**, **deterministic** Arrow IPC output, and **modern grid** constructs (IBRs, rich metadata) while staying faithful to legacy PSLF.
+GE PSLF (`.epc` + `.dyd`) to Raptrix PowerFlow Interchange (`.rpf`). Equipment columns are deterministic. Export timestamps use the wall clock.
 
 **Exact sibling** of `raptrix-psse-rs` in architecture, CLI, error handling, logging, packaging, and code style. The goal is zero-surprise developer and user experience across the Raptrix converter family.
 
@@ -29,7 +29,7 @@ For production-scale deployments and the broader solver stack, contact **Raptrix
 ```bash
 raptrix-pslf-rs convert --epc my_case.epc --output my_case.rpf
 raptrix-pslf-rs convert --epc my_case.epc --dyd my_case.dyd --output my_case_dynamic.rpf
-raptrix-pslf-rs convert --epc my_case.epc --output my_case_expanded.rpf --transformer-mode expanded
+raptrix-pslf-rs convert --epc my_case.epc --output my_case.rpf --transformer-mode expanded
 raptrix-pslf-rs view --input my_case.rpf
 ```
 
@@ -46,7 +46,7 @@ raptrix-pslf-rs convert --epc <FILE> [--dyd <FILE>] --output <FILE> [--transform
 | `--epc <PATH>` | yes | GE PSLF EPC file (.epc / .EPC). |
 | `--dyd <PATH>` | no | Optional dynamic data file (.dyd). |
 | `--output <PATH>` | yes | Output RPF path. |
-| `--transformer-mode <MODE>` | no | `native-3w` (default) or `expanded` (mirrors psse-rs). |
+| `--transformer-mode <MODE>` | no | Metadata token `native-3w` (default) or `expanded`. Electrical rows stay two-winding; `transformers_3w` stays empty. |
 | `--study-purpose <TEXT>` | no | Metadata override for `metadata.study_purpose`. |
 | `--scenario-tag <TAG>` | no | Repeatable metadata override for `metadata.scenario_tags`. |
 | `--case-mode <MODE>` | no | Optional override (`flat_start_planning`, `warm_start_planning`, `solved_snapshot`, `hour_ahead_advisory`). |
@@ -58,80 +58,24 @@ Pretty-prints table row counts from an existing `.rpf`.
 
 ### validate
 
-Runs basic structural checks on an `.epc` (parse success + required table presence). Use `--strict` for CI exit codes.
+Parses an `.epc` and reports structural errors. An EPC with no bus records is an error. `--strict` exits non-zero when any error is present.
 
 ## Fidelity & Modern Grid Support
 
-- Emits the full set of **18** canonical required RPF **v0.14.3** root tables (zero-row where appropriate). Nullable `buses.latitude` / `buses.longitude` are always null (no WGS84 in EPC). Facility-membership flags on circuits and transformers are **null**. Switched-shunt control columns are **null** (do not invent PSS/E MODSW). `contingencies` is a zero-row stub; `contingency_sequences` is omitted.
+- Emits the full set of **18** canonical required RPF **v0.14.4** root tables (zero-row where appropriate), plus `dc_converters` (always emitted, including zero rows; not one of the 18). `dc_lines_2w` stays 15 columns and is empty on this path (`p_setpoint_mw` is rectifier DC power). `branches` is 36 columns; `g_from`, `b_from`, `g_to`, and `b_to` are **null** (`b_shunt` stays total line charging). Nullable `buses.latitude` / `buses.longitude` are always null (no WGS84 in EPC). Facility-membership flags on circuits and transformers are **null**. Switched-shunt control columns are **null** (do not invent MODSW from EPC SVD). `computational_load_profiles` is omitted and `computational_load_mode` is null. `contingencies` is a zero-row stub; `contingency_sequences` is omitted. Root metadata stamps `raptrix.features.dc_converters=true`.
 - IBR classification driven from `.dyd` model records (GENROU family + REPC_A / equivalent, matching psse-rs DYR logic where possible).
-- Deterministic `case_fingerprint`, `bus_uuid` generation, and slack selection.
-- Same sanitization and interchange-boundary rules as the PSS/E sibling.
+- `case_fingerprint` is title length plus bus, generator, and load counts. It is not a content hash.
 - Full post-write contract validation via `raptrix-cim-arrow::validate_rpf_file`.
 
-See `docs/pslf-mapping.md` for the authoritative field-by-field translation rules (to be expanded as the parser matures).
+See `docs/pslf-mapping.md` for the field-by-field translation rules.
 
-## Test Data (Important — licensed / confidential)
+## Local inputs
 
-The reference test cases live in `tests/networks/` (Texas synthetic grids, the Memphis TAMU IBR-heavy synthetic, and ACTIVSg used for cross-validation with psse-rs).
+Licensed decks, if present, live only under `tests/networks/` on a developer machine. That directory is gitignored. Do not commit those files or cite their names, bus ids, or operating points in tracked text.
 
-**These files must never be committed to GitHub.** They are protected by a strict `.gitignore` and are only present on authorized developer machines.
+`tests/golden/` is the local regenerated corpus (`cargo test --test golden_test`). Those `.rpf` files are gitignored.
 
-**Canonical local RPF corpus:** `tests/golden/` (regenerated by `cargo test --test golden_test`). Prefer that path over scratch `tests/compare/` outputs, which can go stale.
-
-**Coverage note:** Larger RAW-only interconnect cases exist only under `raptrix-psse-rs` — there are no PSLF EPC decks in this repo for those cases.
-
-**Primary regression signal**: For any grid that exists in both formats, the RPF produced from the `.epc` (this tool) must be row-count and aggregate equivalent to the RPF produced from the corresponding `.raw` (psse-rs).
-
-## Cross-Repo Power Flow Integration
-
-End-to-end workflow for comparing PSLF- and PSS/E-derived RPF files under **raptrix-core** Newton–Raphson (PV/PQ modes):
-
-### 1. Generate aligned RPF pairs
-
-```powershell
-# Windows (PSLF via WSL build; PSSE native)
-pwsh scripts/compare-psse-rpf.ps1
-
-# Linux / Git Bash
-bash scripts/compare-psse-rpf.sh
-```
-
-Both scripts pass `--case-mode warm_start_planning --default-shunt-control-mode planning_full` so export metadata matches between converters. Output:
-
-- `tests/compare/pslf/{case}.rpf`
-- `tests/compare/psse/{case}.rpf`
-
-Structural diff: `compare_rpf left.rpf right.rpf` (built with this crate).
-
-### 2. Solve and compare in raptrix-core
-
-```powershell
-cd ..\raptrix-core
-$env:PYTHONPATH = (Get-Location)
-.\.venv\Scripts\python.exe python_tests\regression\pslf_psse_rpf_parity_harness.py `
-  --pslf-dir ..\raptrix-pslf-rs\tests\compare\pslf `
-  --psse-dir ..\raptrix-pslf-rs\tests\compare\psse `
-  --log python_tests\regression\out\pslf_psse_parity.jsonl
-
-.\.venv\Scripts\python.exe python_tests\regression\parse_pslf_psse_log.py `
-  --log python_tests\regression\out\pslf_psse_parity.jsonl `
-  --output python_tests\regression\out\pslf_psse_parity_report.md
-```
-
-### Known PSLF vs PSS/E differences (v0.5.6)
-
-These are **real format semantics**, not missing parser rows on core tables:
-
-| Topic | PSLF-native | PSS/E-native | PF impact |
-|-------|-------------|--------------|-----------|
-| **Fixed shunts** | large benchmark case EPC has `shunt data [0]`; no explicit table rows | 205 `fixed_shunts` rows | **Resolved for large benchmark case** — bus `b_shunt` matches via SVD `b_init_pu`; table row-count still differs |
-| **SVD bank granularity** | One row per step (`switched_shunt_banks`) | Often compressed banks | Low if bus-level SVD counts match |
-| **Bus Q limits** | PV bus `q_min`/`q_max` often 0 in export | Aggregated from online gens | May affect post-solve parity vs PSSE (Q enforcement) |
-| **Dynamics** | DYD model count ≠ DYR count | Different vendor formats | None for steady-state PF |
-
-Core network tables (buses, branches, generators, loads, transformers_2w, areas, zones, owners) match row counts on large benchmark case. Spot checks on bus 110001 voltages and gen 111180 MW match between converters.
-
-**Windows note:** If `cargo build` fails with Application Control (error 4551) under OneDrive, build via WSL: `wsl -e bash -lc 'cd /mnt/c/.../raptrix-pslf-rs && cargo build --release'`, or set `CARGO_TARGET_DIR=C:\temp\raptrix-pslf-rs-target`.
+**Windows note:** If `cargo build` fails with Application Control (error 4551) under OneDrive, build via WSL or set `CARGO_TARGET_DIR` outside the synced folder.
 
 ## Building & Releasing
 
@@ -156,7 +100,7 @@ Golden policy (parity with `raptrix-psse-rs`): canonical `tests/golden/<stem>.rp
 
 ## Versioning & Schema Contract
 
-This crate is pinned to **`raptrix-cim-arrow` 0.7.3** (git tag `v0.7.3`, RPF **v0.14.3**), matching `raptrix-psse-rs`. For a sibling `raptrix-cim-rs` checkout, use a **local** `[patch]` in `.cargo/config.toml` (not committed). Every emitted `.rpf` is validated against the locked contract before returning and carries synthesized **`mrid`** identifiers on equipment tables. Facility-membership flags and switched-shunt control columns are emitted null (do not invent BES from kV or MODSW from EPC SVD). Readers accept v0.14.3 through v0.13.0; pre-0.13 files must be re-exported; see [MIGRATION.md](MIGRATION.md).
+This crate is pinned to **`raptrix-cim-arrow` 0.7.4** (git tag `v0.7.4`, RPF **v0.14.4**). For a sibling `raptrix-cim-rs` checkout, use a **local** `[patch]` in `.cargo/config.toml` (not committed). Every emitted `.rpf` is validated against the locked contract before returning and carries synthesized **`mrid`** identifiers on equipment tables. Facility-membership flags and switched-shunt control columns are emitted null (do not invent BES from kV or MODSW from EPC SVD). Branch-end shunts `g_from` / `b_from` / `g_to` / `b_to` are null. Readers accept `v0.14.4` and `0.14.4` only; older files must be re-exported. `v0.15.0` is reserved and is not used. See [MIGRATION.md](MIGRATION.md).
 
 See [raptrix-cim-rs schema-contract](https://github.com/RaptrixPowerFlow/raptrix-cim-rs/blob/main/docs/schema-contract.md) for the full RPF specification.
 

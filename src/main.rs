@@ -31,7 +31,7 @@ enum Commands {
     /// Parse a GE PSLF case and write a Raptrix PowerFlow Interchange (.rpf) file.
     ///
     /// Example:
-    ///   raptrix-pslf-rs convert --epc tests/networks/Texas7k_20210804.EPC --output case.rpf
+    ///   raptrix-pslf-rs convert --epc case.epc --output case.rpf
     Convert {
         /// Path to the GE PSLF EPC file (.epc or .EPC).
         #[arg(long)]
@@ -45,7 +45,8 @@ enum Commands {
         #[arg(long)]
         output: PathBuf,
 
-        /// Transformer representation mode for 3-winding devices (mirrors psse-rs).
+        /// Metadata token `native-3w` (default) or `expanded`.
+        /// Electrical columns are two-winding records either way. `transformers_3w` stays empty.
         #[arg(long, default_value = "native-3w")]
         transformer_mode: String,
 
@@ -122,7 +123,6 @@ fn main() -> Result<()> {
                 ..Default::default()
             };
 
-            // Placeholder — real implementation comes in later phases
             raptrix_pslf_rs::write_pslf_to_rpf_with_options(
                 epc_str,
                 dyd.as_deref().and_then(|p| p.to_str()),
