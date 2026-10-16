@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-10-16
+
+### RPF v0.14.5 (raptrix-cim-arrow 0.7.6) — dynamics vocabulary
+
+- Pin `raptrix-cim-arrow` to git tag `v0.7.6`. Writers stamp `v0.14.5`. Readers accept `v0.14.5` and `0.14.5` only. Re-export every cached `.rpf`.
+- DYD numeric tails are `p1`..`pN`. `p0` is not written. A model whose token count matches the shared dictionary also stores those names, `params_named`, and `dict_code`. A different length stays positional and sets `token_count_mismatch`.
+- `GENROU`, `GENROE`, `GENSAL`, `GENSAE`, and `GENCLS` fill `classical_params` from dictionary `H`, `D`, and `xd_prime` only when the length matches. `GENCLS` has no `xd_prime`.
+
 ## [0.7.4] - 2026-09-22
 
 ### RPF v0.14.4 (raptrix-cim-arrow 0.7.4) — converter table and branch-end shunts

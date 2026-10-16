@@ -1,5 +1,18 @@
 # Migration — raptrix-pslf-rs
 
+## v0.7.5 / RPF v0.14.5 (dynamics vocabulary)
+
+`raptrix-pslf-rs` **0.7.5** emits RPF **v0.14.5**.
+
+### What changed
+
+- Writer stamps `v0.14.5`. The linked reader accepts only **`v0.14.5`** and **`0.14.5`**.
+  v0.14.4 and every older stamp are rejected. Re-export cached `.rpf` files.
+  **`v0.15.0`** is reserved and is not stamped.
+- DYD parameters are `p1`..`pN`. Dictionary names are added when the token count matches the PSS/E dictionary. A mismatch stays positional (`token_count_mismatch=1`) and leaves `classical_params` null.
+- Matching `GENROU` / `GENROE` / `GENSAL` / `GENSAE` / `GENCLS` rows fill `classical_params` from `H`, `D`, and `xd_prime`.
+- **Dependency**: `raptrix-cim-arrow` **0.7.6** / git tag **`v0.7.6`**.
+
 ## v0.7.4 / RPF v0.14.4 (converter table and branch-end shunts)
 
 `raptrix-pslf-rs` **0.7.4** emits RPF **v0.14.4**.

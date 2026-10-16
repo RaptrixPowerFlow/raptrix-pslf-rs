@@ -11,7 +11,7 @@
 
 **raptrix-pslf-rs**
 
-This document provides the field-by-field rules for translating GE PSLF EPC (power flow) and DYD (dynamics) records into the Raptrix PowerFlow Interchange (`.rpf` / RPF **v0.14.4**) Apache Arrow schema.
+This document provides the field-by-field rules for translating GE PSLF EPC (power flow) and DYD (dynamics) records into the Raptrix PowerFlow Interchange (`.rpf` / RPF **v0.14.5**) Apache Arrow schema.
 
 **Fidelity policy**: numeric fields are written exactly as they appear in the source EPC file unless an explicit normalisation rule is documented below. No value clamping, substitution, or scaling is applied at parse time except where required to match the RPF schema units (e.g. MVA → per-unit on SBASE). Validation and singularity handling are the responsibility of the downstream solver.
 
@@ -19,7 +19,7 @@ This document provides the field-by-field rules for translating GE PSLF EPC (pow
 
 ## Version compatibility
 
-- **RPF contract**: **v0.14.4** emit (`raptrix-cim-arrow` 0.7.4). Readers accept **`v0.14.4`** and **`0.14.4`** only. v0.14.3 and every older stamp are rejected. Re-export cached `.rpf` files. `v0.15.0` is reserved and is not used. Optional CLP columns are not authored on this path (`computational_load_profiles` omitted, `computational_load_mode` null). `shunt_control_mode` / `regulated_bus_id` are **null** — do not invent MODSW from EPC SVD.
+- **RPF contract**: **v0.14.5** emit (`raptrix-cim-arrow` 0.7.6). Readers accept **`v0.14.5`** and **`0.14.5`** only. v0.14.4 and every older stamp are rejected. Re-export cached `.rpf` files. `v0.15.0` is reserved and is not used. DYD tails are `p1`..`pN`; dictionary names and `classical_params` are written only when the token count matches. Optional CLP columns are not authored on this path (`computational_load_profiles` omitted, `computational_load_mode` null). `shunt_control_mode` / `regulated_bus_id` are **null** — do not invent MODSW from EPC SVD.
 - Trailing nullable **`is_secured` / `is_bes` / `is_bps` / `is_bptf`** on `branches`, `transformers_2w`, `transformers_3w`, and `multi_section_lines` are **null**. Do not invent BES from kV.
 - `branches` is 36 columns. Trailing **`g_from` / `b_from` / `g_to` / `b_to`** are **null** (this source has R, X, and B only). `b_shunt` stays total line charging. Bus `g_shunt` / `b_shunt` aggregation is unchanged.
 - Equipment tables include nullable trailing **`mrid`** on new exports; `buses.latitude` / `buses.longitude` are null (no WGS84 in EPC).

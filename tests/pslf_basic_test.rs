@@ -82,9 +82,9 @@ fn synthetic_epc_honors_type_impedance_and_svd_blocks() -> Result<()> {
     let metadata = rpf_file_metadata(out.path())?;
     assert_eq!(
         metadata.get("rpf_version").map(String::as_str),
-        Some("v0.14.4")
+        Some("v0.14.5")
     );
-    assert_eq!(RPF_VERSION, "v0.14.4");
+    assert_eq!(RPF_VERSION, "v0.14.5");
 
     let tables: BTreeMap<_, _> = read_rpf_tables(out.path())?.into_iter().collect();
     let buses = tables.get(TABLE_BUSES).unwrap();

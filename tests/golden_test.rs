@@ -42,7 +42,7 @@ fn assert_v0144_export_shape(path: &str) {
     let metadata = raptrix_cim_arrow::rpf_file_metadata(path).expect("rpf metadata");
     assert_eq!(
         metadata.get("rpf_version").map(String::as_str),
-        Some("v0.14.4"),
+        Some("v0.14.5"),
         "{path} stamp"
     );
     assert_eq!(
@@ -307,7 +307,7 @@ fn run_case(
 #[test]
 fn golden_build_all_network_epc_cases() {
     assert!(
-        matches!(RPF_VERSION, "v0.14.4"),
+        matches!(RPF_VERSION, "v0.14.5"),
         "unexpected RPF_VERSION {RPF_VERSION}"
     );
 

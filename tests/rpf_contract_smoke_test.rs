@@ -5,7 +5,7 @@
 // If a copy of the MPL was not distributed with this file, You can obtain one at
 // https://mozilla.org/MPL/2.0/.
 
-//! Locked RPF interchange contract smoke tests (v0.14.4).
+//! Locked RPF interchange contract smoke tests (v0.14.5).
 
 use std::collections::HashMap;
 
@@ -75,7 +75,7 @@ fn dict_utf8_at(col: &dyn Array, i: usize) -> &str {
 fn crate_exports_rpf_version_constant() {
     assert_eq!(LIB_RPF_VERSION, RPF_VERSION);
     assert!(
-        matches!(RPF_VERSION, "v0.14.4"),
+        matches!(RPF_VERSION, "v0.14.5"),
         "unexpected RPF_VERSION {RPF_VERSION}"
     );
 }
@@ -173,7 +173,7 @@ fn exported_rpf_carries_v0130_contract_metadata() -> Result<()> {
     );
     assert_eq!(
         root_meta.get(METADATA_KEY_RPF_VERSION).map(String::as_str),
-        Some("v0.14.4")
+        Some("v0.14.5")
     );
     assert_eq!(
         root_meta

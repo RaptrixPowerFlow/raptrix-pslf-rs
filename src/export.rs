@@ -6,7 +6,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use arrow::array::{
     BooleanArray, BooleanBuilder, Float64Array, Float64Builder, Int32Array, Int32Builder,
-    ListBuilder, MapBuilder, MapFieldNames, StringBuilder, StringDictionaryBuilder,
+    ListBuilder, MapBuilder, MapFieldNames, StringBuilder, StringDictionaryBuilder, StructBuilder,
     TimestampMicrosecondBuilder, new_null_array,
 };
 use arrow::datatypes::{Int32Type, UInt32Type};
@@ -16,7 +16,8 @@ use raptrix_cim_arrow::{
     BUS_TYPE_PQ, BUS_TYPE_PV, BUS_TYPE_SLACK, METADATA_KEY_COMPUTATIONAL_LOAD_MODE, TABLE_AREAS,
     TABLE_BRANCHES, TABLE_BUSES, TABLE_DYNAMICS_MODELS, TABLE_FIXED_SHUNTS, TABLE_GENERATORS,
     TABLE_LOADS, TABLE_METADATA, TABLE_OWNERS, TABLE_SWITCHED_SHUNT_BANKS, TABLE_SWITCHED_SHUNTS,
-    TABLE_TRANSFORMERS_2W, TABLE_TRANSFORMERS_3W, TABLE_ZONES, table_schema,
+    TABLE_TRANSFORMERS_2W, TABLE_TRANSFORMERS_3W, TABLE_ZONES, classical_params_struct_fields,
+    table_schema,
 };
 
 use crate::models::{
@@ -1571,6 +1572,81 @@ pub fn build_owners_batch(owners: &[Owner]) -> Result<RecordBatch> {
     .context("building owners batch")
 }
 
+fn push_param(params: &mut Vec<(String, f64)>, key: &str, value: f64) {
+    if value.is_finite() {
+        params.push((key.to_string(), value));
+    }
+}
+
+/// `p1`..`pN` plus dictionary names when the token count matches PSS/E.
+/// A known model with a different length stays positional and sets
+/// `token_count_mismatch`. `p0` is not written.
+fn dynamics_param_entries(rec: &DydModelData) -> Vec<(String, f64)> {
+    let mut entries = Vec::new();
+    for (idx, value) in rec.params.iter().enumerate() {
+        push_param(&mut entries, &format!("p{}", idx + 1), *value);
+    }
+    let mut params_named = 0.0;
+    let mut icon_count = 0.0;
+    let mut con_count = 0.0;
+    let mut dict_code = 0.0;
+    let mut mismatch = 0.0;
+    if let Some(def) = raptrix_cim_arrow::dyn_dictionary::lookup_psse(rec.model_type.as_ref()) {
+        dict_code = f64::from(def.code);
+        icon_count = def.icons.len() as f64;
+        con_count = def.cons.len() as f64;
+        if rec.params.len() == def.data_len() {
+            params_named = 1.0;
+            for (i, name) in def.icons.iter().chain(def.cons.iter()).enumerate() {
+                push_param(&mut entries, name, rec.params[i]);
+            }
+        } else {
+            mismatch = 1.0;
+        }
+    }
+    push_param(&mut entries, "params_named", params_named);
+    push_param(&mut entries, "icon_count", icon_count);
+    push_param(&mut entries, "con_count", con_count);
+    if dict_code > 0.0 {
+        push_param(&mut entries, "dict_code", dict_code);
+    }
+    if mismatch > 0.0 {
+        push_param(&mut entries, "token_count_mismatch", 1.0);
+    }
+    entries
+}
+
+fn named_param(entries: &[(String, f64)], key: &str) -> Option<f64> {
+    entries
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(key))
+        .map(|(_, value)| *value)
+        .filter(|value| value.is_finite())
+}
+
+/// Classical block only when the dictionary named the machine row.
+fn classical_from_named(
+    model: &str,
+    entries: &[(String, f64)],
+) -> (Option<f64>, Option<f64>, Option<f64>) {
+    let upper = model.to_ascii_uppercase();
+    if !matches!(
+        upper.as_str(),
+        "GENROU" | "GENROE" | "GENSAL" | "GENSAE" | "GENCLS"
+    ) || named_param(entries, "params_named") != Some(1.0)
+    {
+        return (None, None, None);
+    }
+    let h = named_param(entries, "H").filter(|value| *value > 0.0);
+    let d = named_param(entries, "D");
+    let xd_prime = if upper == "GENCLS" {
+        None
+    } else {
+        named_param(entries, "xd_prime").filter(|value| *value > 0.0)
+    };
+    (h, d, xd_prime)
+}
+
 pub fn build_dynamics_models_batch(records: &[DydModelData]) -> Result<RecordBatch> {
     let schema =
         Arc::new(table_schema(TABLE_DYNAMICS_MODELS).expect("dynamics_models schema must exist"));
@@ -1588,14 +1664,17 @@ pub fn build_dynamics_models_batch(records: &[DydModelData]) -> Result<RecordBat
         StringBuilder::new(),
         Float64Builder::new(),
     );
+    let mut classical_rows = Vec::with_capacity(records.len());
 
     for rec in records {
         bus_id.append_value(rec.bus as i32);
         gen_id.append_value(rec.id.as_ref());
         model_type.append_value(rec.model_type.as_ref());
 
-        for (idx, value) in rec.params.iter().enumerate() {
-            params.keys().append_value(format!("p{idx}"));
+        let entries = dynamics_param_entries(rec);
+        classical_rows.push(classical_from_named(rec.model_type.as_ref(), &entries));
+        for (key, value) in &entries {
+            params.keys().append_value(key);
             params.values().append_value(*value);
         }
         params
@@ -1618,15 +1697,28 @@ pub fn build_dynamics_models_batch(records: &[DydModelData]) -> Result<RecordBat
         .data_type()
         .clone();
     let perc1_params_col = new_null_array(&perc1_params_type, records.len());
-    // v0.13.0 classical block: PSLF DYD numeric params are positionally keyed (p0..);
-    // leave classical_params null unless future mapping fills H/D/xd'.
-    let classical_params_col = new_null_array(
-        schema
-            .field_with_name("classical_params")
-            .expect("dynamics_models schema must include classical_params (v0.13.0+)")
-            .data_type(),
-        records.len(),
-    );
+
+    let mut classical_b =
+        StructBuilder::from_fields(classical_params_struct_fields(), records.len());
+    for (h, d, xd_prime) in classical_rows {
+        classical_b
+            .field_builder::<Float64Builder>(0)
+            .expect("classical H")
+            .append_option(h);
+        classical_b
+            .field_builder::<Float64Builder>(1)
+            .expect("classical D")
+            .append_option(d);
+        classical_b
+            .field_builder::<Float64Builder>(2)
+            .expect("classical xd_prime")
+            .append_option(xd_prime);
+        classical_b
+            .field_builder::<Float64Builder>(3)
+            .expect("classical mbase_mva")
+            .append_option(None);
+        classical_b.append(h.is_some() || d.is_some() || xd_prime.is_some());
+    }
 
     RecordBatch::try_new(
         schema,
@@ -1636,7 +1728,7 @@ pub fn build_dynamics_models_batch(records: &[DydModelData]) -> Result<RecordBat
             Arc::new(model_type.finish()),
             params_cast,
             perc1_params_col,
-            classical_params_col,
+            Arc::new(classical_b.finish()),
         ],
     )
     .context("building dynamics_models batch")
@@ -1841,4 +1933,88 @@ fn validate_transformer_representation_mode(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod dynamics_vocabulary_tests {
+    use super::*;
+    use arrow::array::{Array, Float64Array, MapArray, StringArray, StructArray};
+
+    fn sample(model: &str, params: Vec<f64>) -> DydModelData {
+        DydModelData {
+            model_type: model.into(),
+            bus: 10,
+            name: "G1".into(),
+            kv: 13.8,
+            id: "1".into(),
+            params,
+            raw_line: String::new().into(),
+        }
+    }
+
+    fn map_keys(batch: &RecordBatch, row: usize) -> Vec<String> {
+        let map = batch
+            .column_by_name("params")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<MapArray>()
+            .unwrap();
+        let keys = map.keys().as_any().downcast_ref::<StringArray>().unwrap();
+        let offsets = map.offsets();
+        let start = offsets[row] as usize;
+        let end = offsets[row + 1] as usize;
+        (start..end).map(|i| keys.value(i).to_string()).collect()
+    }
+
+    #[test]
+    fn genrou_match_uses_p1_and_dictionary_h() {
+        let def = raptrix_cim_arrow::dyn_dictionary::lookup_psse("GENROU").unwrap();
+        let mut params = vec![0.1; def.data_len()];
+        let h_at = def.cons.iter().position(|name| *name == "H").unwrap();
+        let d_at = def.cons.iter().position(|name| *name == "D").unwrap();
+        let xd_at = def
+            .cons
+            .iter()
+            .position(|name| *name == "xd_prime")
+            .unwrap();
+        params[h_at] = 4.2;
+        params[d_at] = 0.2;
+        params[xd_at] = 0.31;
+        let batch = build_dynamics_models_batch(&[sample("genrou", params)]).unwrap();
+        let keys = map_keys(&batch, 0);
+        assert!(keys.iter().any(|key| key == "p1"));
+        assert!(!keys.iter().any(|key| key == "p0"));
+        assert!(keys.iter().any(|key| key == "H"));
+        let classical = batch
+            .column_by_name("classical_params")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StructArray>()
+            .unwrap();
+        assert!(!classical.is_null(0));
+        let h = classical
+            .column_by_name("H")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Float64Array>()
+            .unwrap();
+        assert!((h.value(0) - 4.2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn short_genrou_stays_positional() {
+        let batch = build_dynamics_models_batch(&[sample("GENROU", vec![1.0, 2.0])]).unwrap();
+        let keys = map_keys(&batch, 0);
+        assert!(keys.iter().any(|key| key == "p1"));
+        assert!(keys.iter().any(|key| key == "p2"));
+        assert!(!keys.iter().any(|key| key == "p0" || key == "H"));
+        assert!(keys.iter().any(|key| key == "token_count_mismatch"));
+        let classical = batch
+            .column_by_name("classical_params")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StructArray>()
+            .unwrap();
+        assert!(classical.is_null(0));
+    }
 }
