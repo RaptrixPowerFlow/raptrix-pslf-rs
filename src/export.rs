@@ -13,11 +13,11 @@ use arrow::datatypes::{Int32Type, UInt32Type};
 use arrow::record_batch::RecordBatch;
 use chrono::{SecondsFormat, Utc};
 use raptrix_cim_arrow::{
-    BUS_TYPE_PQ, BUS_TYPE_PV, BUS_TYPE_SLACK, METADATA_KEY_COMPUTATIONAL_LOAD_MODE, TABLE_AREAS,
-    TABLE_BRANCHES, TABLE_BUSES, TABLE_DYNAMICS_MODELS, TABLE_FIXED_SHUNTS, TABLE_GENERATORS,
-    TABLE_LOADS, TABLE_METADATA, TABLE_OWNERS, TABLE_SWITCHED_SHUNT_BANKS, TABLE_SWITCHED_SHUNTS,
-    TABLE_TRANSFORMERS_2W, TABLE_TRANSFORMERS_3W, TABLE_ZONES, classical_params_struct_fields,
-    table_schema,
+    BUS_TYPE_PQ, BUS_TYPE_PV, BUS_TYPE_SLACK, METADATA_KEY_COMPUTATIONAL_LOAD_MODE, SCHEMA_VERSION,
+    TABLE_AREAS, TABLE_BRANCHES, TABLE_BUSES, TABLE_DYNAMICS_MODELS, TABLE_FIXED_SHUNTS,
+    TABLE_GENERATORS, TABLE_LOADS, TABLE_METADATA, TABLE_OWNERS, TABLE_SWITCHED_SHUNT_BANKS,
+    TABLE_SWITCHED_SHUNTS, TABLE_TRANSFORMERS_2W, TABLE_TRANSFORMERS_3W, TABLE_ZONES,
+    classical_params_struct_fields, table_schema,
 };
 
 use crate::models::{
@@ -436,7 +436,7 @@ pub fn build_metadata_batch(
         TimestampMicrosecondBuilder::with_capacity(1).with_timezone(utc_tz);
     snapshot_timestamp_utc.append_value(ts_micros);
     let mut raptrix_version = StringBuilder::new();
-    raptrix_version.append_value(env!("CARGO_PKG_VERSION"));
+    raptrix_version.append_value(SCHEMA_VERSION);
     let mut case_fingerprint = StringBuilder::new();
     case_fingerprint.append_value(case_fingerprint_value);
 

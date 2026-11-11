@@ -1,5 +1,9 @@
 # Migration — raptrix-pslf-rs
 
+## v0.14.6 computational-load screening fields
+
+Writers emit **v0.14.6**. Readers accept **v0.14.6** and **v0.14.5**. EPC and DYD do not contain IT/PE fraction, cooling carve-out, multi-sag, envelope preset, or verification time, so those columns stay absent unless `ExportOptions.computational_load_profiles` supplies them. Unset fields on a supplied row stay null. Recovery math stays out of this converter.
+
 ## v0.7.5 / RPF v0.14.5 (dynamics vocabulary)
 
 `raptrix-pslf-rs` **0.7.5** emits RPF **v0.14.5**.

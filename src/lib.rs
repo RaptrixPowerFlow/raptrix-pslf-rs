@@ -6,7 +6,7 @@
 // https://mozilla.org/MPL/2.0/.
 
 //! `raptrix-pslf-rs` — High-performance GE PSLF (`.epc` + `.dyd`) →
-//! Raptrix PowerFlow Interchange v0.14.5 converter.
+//! Raptrix PowerFlow Interchange v0.14.6 converter.
 
 pub mod export;
 pub mod models;
@@ -22,11 +22,13 @@ use raptrix_cim_arrow::{
     IDENTITY_MODEL_HYBRID_SOLVER_FLAT_V1, METADATA_KEY_CASE_FINGERPRINT, METADATA_KEY_CASE_MODE,
     METADATA_KEY_DEFAULT_SHUNT_CONTROL_MODE, METADATA_KEY_IDENTITY_MODEL,
     METADATA_KEY_SOLVED_STATE_PRESENCE, METADATA_KEY_VALIDATION_MODE, RootWriteOptions,
-    TABLE_AREAS, TABLE_BRANCHES, TABLE_BUSES, TABLE_CONTINGENCIES, TABLE_DC_CONVERTERS,
-    TABLE_DC_LINES_2W, TABLE_DYNAMICS_MODELS, TABLE_FIXED_SHUNTS, TABLE_GENERATORS,
-    TABLE_INTERFACES, TABLE_LOADS, TABLE_METADATA, TABLE_MULTI_SECTION_LINES, TABLE_OWNERS,
-    TABLE_SWITCHED_SHUNT_BANKS, TABLE_SWITCHED_SHUNTS, TABLE_TRANSFORMERS_2W,
-    TABLE_TRANSFORMERS_3W, TABLE_ZONES, empty_dc_converters_batch, write_root_rpf_with_metadata,
+    TABLE_AREAS, TABLE_BRANCHES, TABLE_BUSES, TABLE_COMPUTATIONAL_LOAD_PROFILES,
+    TABLE_CONTINGENCIES, TABLE_DC_CONVERTERS, TABLE_DC_LINES_2W, TABLE_DYNAMICS_MODELS,
+    TABLE_FIXED_SHUNTS, TABLE_GENERATORS, TABLE_INTERFACES, TABLE_LOADS, TABLE_METADATA,
+    TABLE_MULTI_SECTION_LINES, TABLE_OWNERS, TABLE_SWITCHED_SHUNT_BANKS, TABLE_SWITCHED_SHUNTS,
+    TABLE_TRANSFORMERS_2W, TABLE_TRANSFORMERS_3W, TABLE_ZONES,
+    build_computational_load_profiles_batch, empty_dc_converters_batch,
+    write_root_rpf_with_metadata,
 };
 
 pub use raptrix_cim_arrow::{
@@ -69,6 +71,10 @@ pub struct ExportOptions {
     pub default_shunt_control_mode_override: Option<String>,
     /// Optional `scenario_context` rows (unsupported on the standard PSLF export path).
     pub scenario_context_rows: Vec<ScenarioContextRow>,
+    /// Optional computational-load rows. EPC/DYD has no cooling carve-out or CLO
+    /// verification fields. An empty list omits `computational_load_profiles`.
+    /// Supplied rows keep unset v0.14.6 fields null.
+    pub computational_load_profiles: Vec<raptrix_cim_arrow::ComputationalLoadProfileRow>,
 }
 
 /// One row for the optional v0.9.0 `scenario_context` table when a writer emits that optional root.
@@ -222,6 +228,13 @@ pub fn write_pslf_to_rpf_with_options(
         export::build_dynamics_models_batch(&network.dyd_models)?
     };
     table_batches.insert(TABLE_DYNAMICS_MODELS, dynamics_batch);
+    let include_computational_load_profiles = !options.computational_load_profiles.is_empty();
+    if include_computational_load_profiles {
+        table_batches.insert(
+            TABLE_COMPUTATIONAL_LOAD_PROFILES,
+            build_computational_load_profiles_batch(&options.computational_load_profiles)?,
+        );
+    }
 
     export::validate_export_invariants(&table_batches, options.transformer_representation_mode)?;
 
@@ -229,6 +242,7 @@ pub fn write_pslf_to_rpf_with_options(
         dynamics_are_stub: network.dyd_models.is_empty(),
         contingencies_are_stub: true,
         include_contingency_sequences: false,
+        include_computational_load_profiles,
         ..RootWriteOptions::default()
     };
 
